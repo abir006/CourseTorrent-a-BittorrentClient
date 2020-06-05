@@ -21,15 +21,15 @@ class StorageTest {
     @Nested inner class `writing to storage` {
         @Test
         fun `write operation writes to the storage`() {
-            storage.write("2", "b".toByteArray())
+            storage.write("2", "b".toByteArray()).get()
 
             verify(exactly=1) { storage.cache.write("2", "b".toByteArray()) ; storage.database.write("2".toByteArray(), "b".toByteArray()) }
         }
 
         @Test
         fun `write operation to an existing key overrides the database`() {
-            storage.write("3", "c".toByteArray())
-            storage.write("3", "d".toByteArray())
+            storage.write("3", "c".toByteArray()).get()
+            storage.write("3", "d".toByteArray()).get()
 
             verifyOrder {
                 storage.cache.write("3", "c".toByteArray()) ; storage.database.write("3".toByteArray(), "c".toByteArray())
@@ -40,8 +40,8 @@ class StorageTest {
     @Nested inner class `reading from storage` {
         @Test
         fun `read operation of cached value doesn't access the database`() {
-            storage.write("5", "e".toByteArray())
-            storage.read("5")
+            storage.write("5", "e".toByteArray()).get()
+            storage.read("5").get()
 
             verify(exactly=1) { storage.cache.read("5") }
             verify(exactly=0) { storage.database.read("5".toByteArray()) }
@@ -49,9 +49,9 @@ class StorageTest {
 
         @Test
         fun `read operation of non cached value reads from database simulating restart`() {
-            storage.write("6", "f".toByteArray())
+            storage.write("6", "f".toByteArray()).get()
             storage.cache.clear()
-            storage.read("6")
+            storage.read("6").get()
 
             verify(exactly=1) { storage.cache.read("6") ; storage.database.read("6".toByteArray())}
         }
@@ -59,7 +59,7 @@ class StorageTest {
         @Test
         fun `read operation with an invalid key returns null`() {
 
-            assertNull(storage.read("7"))
+            assertNull(storage.read("7").get())
             verify(exactly=1) { storage.cache.read("7") ; storage.database.read("7".toByteArray())}
         }
     }
@@ -67,19 +67,19 @@ class StorageTest {
     @Nested inner class `deleting from storage` {
         @Test
         fun `read returns null after the key is deleted`() {
-            storage.write("8", "h".toByteArray())
-            storage.delete("8")
+            storage.write("8", "h".toByteArray()).get()
+            storage.delete("8").get()
 
             verify(exactly=1) { storage.cache.delete("8") ; storage.database.write("8".toByteArray(), ByteArray(0))}
-            assertNull(storage.read("8"))
+            assertNull(storage.read("8").get())
         }
 
         @Test
         fun `deleting an invalid key doesn't fail`() {
-            storage.delete("9")
+            storage.delete("9").get()
 
             verify(exactly=1) { storage.cache.delete("9") }
-            assertNull(storage.read("9"))
+            assertNull(storage.read("9").get())
         }
     }
 }
