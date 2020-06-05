@@ -6,25 +6,28 @@ import dev.misfitlabs.kotlinguice4.KotlinModule
 import il.ac.technion.cs.softwaredesign.storage.SecureStorage
 import il.ac.technion.cs.softwaredesign.storage.SecureStorageFactory
 import il.ac.technion.cs.softwaredesign.storage.SecureStorageModule
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.mockkObject
+import java.net.URL
 
-class CourseTorrentModule : KotlinModule() {
+class CourseTorrentTestModule : KotlinModule() {
     override fun configure() {
-        install(SecureStorageModule())
-        bind<HttpClient>().toInstance(HttpClient())
+        bind<HttpClient>().toInstance(mockk(relaxed = true))
     }
 
     @Provides @Inject @AnnouncesSecureStorage
-    fun providesAnnounces(factory: SecureStorageFactory): Storage {
-        return Storage(factory.open("AnnouncesDB".toByteArray()))
+    fun providesAnnounces(): Storage {
+        return Storage(DBSimulator("AnnounceStorage-Test"))
     }
 
     @Provides @Inject @PeersSecureStorage
-    fun providesPeers(factory: SecureStorageFactory): Storage {
-        return Storage(factory.open("PeersDB".toByteArray()))
+    fun providesPeers(): Storage {
+        return Storage(DBSimulator("PeersStorage-Test"))
     }
 
     @Provides @Inject @StatisticsSecureStorage
-    fun providesStatistics(factory: SecureStorageFactory): Storage {
-        return Storage(factory.open("StatisticsDB".toByteArray()))
+    fun providesStatistics(): Storage {
+        return Storage(DBSimulator("StatisticsStorage-Test"))
     }
 }

@@ -28,6 +28,7 @@ subprojects {
     val junitVersion: String? by extra
 
     dependencies {
+        implementation ("com.google.code.gson:gson:2.8.6")
         implementation(kotlin("stdlib-jdk8"))
         implementation(kotlin("reflect"))
 
