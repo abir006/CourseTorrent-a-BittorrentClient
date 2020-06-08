@@ -10,24 +10,24 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
 import java.net.URL
+import java.util.concurrent.CompletableFuture
 
 class CourseTorrentTestModule : KotlinModule() {
     override fun configure() {
         bind<HttpClient>().toInstance(mockk(relaxed = true))
     }
-
     @Provides @Inject @AnnouncesSecureStorage
     fun providesAnnounces(): Storage {
-        return Storage(DBSimulator("AnnounceStorage-Test"))
+        return Storage(CompletableFuture.completedFuture(DBSimulator("AnnounceStorage-Test")))
     }
 
     @Provides @Inject @PeersSecureStorage
     fun providesPeers(): Storage {
-        return Storage(DBSimulator("PeersStorage-Test"))
+        return Storage(CompletableFuture.completedFuture(DBSimulator("PeersStorage-Test")))
     }
 
     @Provides @Inject @StatisticsSecureStorage
     fun providesStatistics(): Storage {
-        return Storage(DBSimulator("StatisticsStorage-Test"))
+        return Storage(CompletableFuture.completedFuture(DBSimulator("StatisticsStorage-Test")))
     }
 }

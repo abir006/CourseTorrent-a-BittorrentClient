@@ -16,28 +16,28 @@ open class Storage @Inject constructor(var database: CompletableFuture<SecureSto
      * Adds the pair (key, value) to both the cache and the storage.
      **/
     fun write(key: String, value: ByteArray): CompletableFuture<Unit> {
-        /*   val future: CompletableFuture<Unit> = CompletableFuture.supplyAsync {
+        /*   val future: CompletableFuture<Unit> = CompletableFuture.supply {
             cache.write(key, value)
-        }.thenComposeAsync {
+        }.thenCompose {
             database.write(key.toByteArray(), value)
         }
         return future*/
 
-        /*      return CompletableFuture.supplyAsync {
+        /*      return CompletableFuture.supply {
             cache.write(key, value)
-        }.thenComposeAsync {
+        }.thenCompose {
             database
-        }.thenComposeAsync { db ->
+        }.thenCompose { db ->
             println("hi")
             db.write(key.toByteArray(), value)
         }*/
 
-       /* return CompletableFuture.supplyAsync {
+       /* return CompletableFuture.supply {
             cache.write(key, value)
-        }.thenCombineAsync(database){_, db ->  db }.thenComposeAsync { db -> db.write(key.toByteArray(), value) }*/
+        }.thenCombine(database){_, db ->  db }.thenCompose { db -> db.write(key.toByteArray(), value) }*/
            /* db.write(key.toByteArray(), value)*/
 
-        return database.thenComposeAsync { db ->
+        return database.thenCompose { db ->
             cache.write(key, value)
             db.write(key.toByteArray(), value)
         }
@@ -52,8 +52,8 @@ open class Storage @Inject constructor(var database: CompletableFuture<SecureSto
 /*    fun read(key: String): CompletableFuture<ByteArray?> {
         val value = cache.read(key)
         if (null == value) {
-            return database.thenComposeAsync { db ->
-                db.read(key.toByteArray()).thenApplyAsync { dbValue ->
+            return database.thenCompose { db ->
+                db.read(key.toByteArray()).thenApply { dbValue ->
                     // Key not found in DB
                     if (null == dbValue || dbValue.contentEquals(ByteArray(0))) {
                         // Update cache
@@ -75,11 +75,11 @@ open class Storage @Inject constructor(var database: CompletableFuture<SecureSto
     }*/
 /*
     fun read(key: String): CompletableFuture<ByteArray?> {
-        return CompletableFuture<ByteArray?>().thenComposeAsync {
+        return CompletableFuture<ByteArray?>().thenCompose {
             val value = cache.read(key)
             if (null == value) {
                 database.thenCompose { db ->
-                    db.read(key.toByteArray()).thenApplyAsync { dbValue ->
+                    db.read(key.toByteArray()).thenApply { dbValue ->
                         // Key not found in DB
                         if (null == dbValue || dbValue.contentEquals(ByteArray(0))) {
                             // Update cache
@@ -102,10 +102,10 @@ open class Storage @Inject constructor(var database: CompletableFuture<SecureSto
     }*/
 
     fun read(key: String): CompletableFuture<ByteArray?> {
-        return database.thenComposeAsync { db ->
+        return database.thenCompose { db ->
             val value = cache.read(key)
             if (null == value) {
-                db.read(key.toByteArray()).thenApplyAsync { dbValue ->
+                db.read(key.toByteArray()).thenApply { dbValue ->
                     // Key not found in DB
                     if (null == dbValue || dbValue.contentEquals(ByteArray(0))) {
                         // Update cache
@@ -130,7 +130,7 @@ open class Storage @Inject constructor(var database: CompletableFuture<SecureSto
      * Removes an entry from both the cache and the storage. A deleted value in the database is marked with ByteArray(0)
      */
     fun delete(key: String): CompletableFuture<Unit> {
-        return database.thenComposeAsync { db ->
+        return database.thenCompose { db ->
             cache.delete(key)
             db.write(key.toByteArray(), ByteArray(0))
         }

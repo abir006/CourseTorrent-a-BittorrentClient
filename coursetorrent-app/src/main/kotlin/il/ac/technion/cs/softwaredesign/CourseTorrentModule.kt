@@ -6,6 +6,7 @@ import dev.misfitlabs.kotlinguice4.KotlinModule
 import il.ac.technion.cs.softwaredesign.storage.SecureStorage
 import il.ac.technion.cs.softwaredesign.storage.SecureStorageFactory
 import il.ac.technion.cs.softwaredesign.storage.SecureStorageModule
+import java.util.concurrent.CompletableFuture
 
 class CourseTorrentModule : KotlinModule() {
     override fun configure() {

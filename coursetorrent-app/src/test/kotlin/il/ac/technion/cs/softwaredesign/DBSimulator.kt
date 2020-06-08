@@ -21,7 +21,7 @@ class DBSimulator @Inject constructor (fileName: String) : SecureStorage {
     override fun write(key: ByteArray, value: ByteArray): CompletableFuture<Unit> {
         val future:CompletableFuture<Unit> = CompletableFuture.supplyAsync {
             db = gson.fromJson(file.readText(), storageType)
-        }.thenApplyAsync {
+        }.thenApply {
             db[String(key)] = value
             file.writeText(gson.toJson(db))
             Unit
@@ -33,7 +33,7 @@ class DBSimulator @Inject constructor (fileName: String) : SecureStorage {
     override fun read(key: ByteArray): CompletableFuture<ByteArray?> {
         val future:CompletableFuture<ByteArray?> = CompletableFuture.supplyAsync {
             db = gson.fromJson(file.readText(), storageType)
-        }.thenApplyAsync {
+        }.thenApply {
             db[String(key)]
         }
         return future

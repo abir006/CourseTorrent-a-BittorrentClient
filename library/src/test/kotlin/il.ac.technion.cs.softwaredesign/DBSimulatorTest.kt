@@ -48,7 +48,7 @@ class DBSimulatorTest {
             val dbSimulator = DBSimulator("dbWriteTestOneEntry")
             dbSimulator.clear()
 
-            dbSimulator.write("1".toByteArray(), "a".toByteArray()).thenComposeAsync {
+            dbSimulator.write("1".toByteArray(), "a".toByteArray()).thenCompose {
                 dbSimulator.write("1".toByteArray(), "b".toByteArray())
             }.get()
 
@@ -61,7 +61,7 @@ class DBSimulatorTest {
             dbSimulator.clear()
             var future:CompletableFuture<Unit> = CompletableFuture.completedFuture(Unit)
             for (i: Int in 1..5) {
-                future = future.thenComposeAsync{
+                future = future.thenCompose{
                     dbSimulator.write(i.toString().toByteArray(), ('a' + i -1).toString().toByteArray())
                 }
             }
@@ -86,7 +86,7 @@ class DBSimulatorTest {
             dbSimulator.clear()
             var future:CompletableFuture<Unit> = CompletableFuture.completedFuture(Unit)
             for (i: Int in 1..5) {
-                future = future.thenComposeAsync { dbSimulator.write(i.toString().toByteArray(), ('a' + i -1).toString().toByteArray())}
+                future = future.thenCompose { dbSimulator.write(i.toString().toByteArray(), ('a' + i -1).toString().toByteArray())}
             }
             future.get()
             dbSimulator.restart()
