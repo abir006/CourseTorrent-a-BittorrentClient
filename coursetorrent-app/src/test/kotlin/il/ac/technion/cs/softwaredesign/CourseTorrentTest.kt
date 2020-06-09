@@ -30,7 +30,7 @@ class CourseTorrentTest {
         (courseTorrent.peersStorage.database.get() as DBSimulator).clear()
         (courseTorrent.statisticsStorage.database.get() as DBSimulator).clear()
     }
-    /*
+
     @Nested
     inner class `homework 0 tests` {
         @Nested
@@ -195,10 +195,12 @@ class CourseTorrentTest {
                 assertNull(courseTorrent.announcesStorage.read(templeOSInfoHash).get())
             }
         }
-    }*/
+    }
+
 
     @Nested
     inner class `homework 1 tests` {
+
         @Nested
         inner class `testing announce functionality` {
             @Test
@@ -211,7 +213,6 @@ class CourseTorrentTest {
                 checkNotNull(throwable.cause)
                 assertThat(throwable.cause!!, isA<java.lang.IllegalArgumentException>())
             }
-
 
             @Test
             fun `correct interval value after simple announce`() {
@@ -284,29 +285,39 @@ class CourseTorrentTest {
             }
         }
 
-        /*
+
         @Nested
         inner class `testing scrape functionality`{
             @Test
+            fun `scraping a torrent with infohash not loaded throws IllegalArgumentException`() {
+                every { courseTorrent.httpClient.getResponse() } returns bencodedSimpleScrapeResponse.toByteArray()
+                val future = assertDoesNotThrow { courseTorrent.scrape(debianInfoHash) }
+                val throwable = assertThrows<ExecutionException> { future.get() }
+
+                checkNotNull(throwable.cause)
+                assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+            }
+
+            @Test
             fun `scraping a torrent with a single tracker returns a correct ditctionary`() {
-                val info = courseTorrent.load(debian)
+                val info = courseTorrent.load(debian).get()
                 every { courseTorrent.httpClient.getResponse() } returns bencodedSimpleScrapeResponse.toByteArray()
 
-                courseTorrent.scrape(info)
+                courseTorrent.scrape(info).get()
 
-                assert((courseTorrent.statisticsStorage.read(info + "_" + debianAnnounces[0][0]) as ByteArray)
+                assert((courseTorrent.statisticsStorage.read(info + "_" + debianAnnounces[0][0]).get() as ByteArray)
                     .contentEquals(bencodedSimpleScrape.toByteArray()))
             }
 
             @Test
             fun `scraping a torrent with trackers not supporting scrape fails all`() {
-                val info = courseTorrent.load(templeOS)
+                val info = courseTorrent.load(templeOS).get()
                 every { courseTorrent.httpClient.getResponse() } returns bencodedSimpleScrapeResponse.toByteArray()
 
-                courseTorrent.scrape(info)
+                courseTorrent.scrape(info).get()
 
                 for (tracker in templeOSAnnounces.flatten()) { assert(
-                    (courseTorrent.statisticsStorage.read(info + "_" + tracker) as ByteArray).
+                    (courseTorrent.statisticsStorage.read(info + "_" + tracker).get() as ByteArray).
                         contentEquals(bencodedUrlFailScrape.toByteArray()))
                 }
             }
@@ -317,24 +328,24 @@ class CourseTorrentTest {
         inner class `testing invalidate peer functionality`{
             @Test
             fun `peer loaded from announce is removed after invalidatePeer`(){
-                val info = courseTorrent.load(debian)
+                val info = courseTorrent.load(debian).get()
                 every { courseTorrent.httpClient.getResponse() } returns bencodedSimpleAnnounceResponse.toByteArray()
-                courseTorrent.announce(info,TorrentEvent.STARTED,123,123,123)
+                courseTorrent.announce(info,TorrentEvent.STARTED,123,123,123).get()
 
-                courseTorrent.invalidatePeer(info,KnownPeer("102.39.113.100",51413,"matan"))
-                val peerList = Bencoder(courseTorrent.peersStorage.read(info) as ByteArray).decodeData() as List<*>
+                courseTorrent.invalidatePeer(info,KnownPeer("102.39.113.100",51413,"matan")).get()
+                val peerList = Bencoder(courseTorrent.peersStorage.read(info).get() as ByteArray).decodeData() as List<*>
 
                 assertFalse(peerList.contains(KnownPeer("102.39.113.100",51413,"matan")))
             }
 
             @Test
             fun `invalidatePeer doesnt remove an invalid peer`(){
-                val info = courseTorrent.load(debian)
+                val info = courseTorrent.load(debian).get()
                 every { courseTorrent.httpClient.getResponse() } returns bencodedSimpleAnnounceResponse.toByteArray()
-                courseTorrent.announce(info,TorrentEvent.STARTED,123,123,123)
+                courseTorrent.announce(info,TorrentEvent.STARTED,123,123,123).get()
 
-                assertDoesNotThrow { courseTorrent.invalidatePeer(info,KnownPeer("6.6.6.6",6666,null)) }
-                val peerList = Bencoder(courseTorrent.peersStorage.read(info) as ByteArray).decodeData() as List<*>
+                assertDoesNotThrow { courseTorrent.invalidatePeer(info,KnownPeer("6.6.6.6",6666,null)).get() }
+                val peerList = Bencoder(courseTorrent.peersStorage.read(info).get() as ByteArray).decodeData() as List<*>
 
                 assertEquals(peerList,(arrayListOf(
                     KnownPeer("107.179.196.13",50000,null),
@@ -347,11 +358,11 @@ class CourseTorrentTest {
         inner class `testing knownPeers funcionality`{
             @Test
             fun `knownPeers sorts the list correctly on a list containing two peers`() {
-                val info = courseTorrent.load(debian)
+                val info = courseTorrent.load(debian).get()
                 every { courseTorrent.httpClient.getResponse() } returns bencodedSimpleAnnounceResponse.toByteArray()
-                courseTorrent.announce(info,TorrentEvent.STARTED,123,123,123)
+                courseTorrent.announce(info,TorrentEvent.STARTED,123,123,123).get()
 
-                val peerList = courseTorrent.knownPeers(info)
+                val peerList = courseTorrent.knownPeers(info).get()
 
                 assertEquals(peerList, arrayListOf(
                     KnownPeer("102.39.113.100",51413,"matan"),
@@ -360,11 +371,11 @@ class CourseTorrentTest {
 
             @Test
             fun `knownPeers sorts the list correctly on numerous ip's`() {
-                val info = courseTorrent.load(debian)
+                val info = courseTorrent.load(debian).get()
                 every { courseTorrent.httpClient.getResponse() } returns bencodedKnownPeersResponse.toByteArray()
-                courseTorrent.announce(info,TorrentEvent.STARTED,123,123,123)
+                courseTorrent.announce(info,TorrentEvent.STARTED,123,123,123).get()
 
-                val peerList = courseTorrent.knownPeers(info)
+                val peerList = courseTorrent.knownPeers(info).get()
 
                 // peerId indicates the wanted order
                 assertEquals(peerList, arrayListOf(
@@ -377,17 +388,16 @@ class CourseTorrentTest {
             }
         }
 
-
         @Nested
         inner class `testing trackerStats functionality`{
             @Test
             fun `successful announce overrides trackersStats who failed at scrape`() {
-                val info = courseTorrent.load(templeOS)
+                val info = courseTorrent.load(templeOS).get()
                 every { courseTorrent.httpClient.getResponse() } returns bencodedSimpleAnnounceResponse.toByteArray()
 
-                courseTorrent.scrape(info)
-                courseTorrent.announce(info,TorrentEvent.STOPPED,123,123,123)
-                val trackerStats = courseTorrent.trackerStats(info)
+                courseTorrent.scrape(info).get()
+                courseTorrent.announce(info,TorrentEvent.STOPPED,123,123,123).get()
+                val trackerStats = courseTorrent.trackerStats(info).get()
 
                 assertEquals(trackerStats, mapOf(
                     templeOSAnnounces[0][0] to Scrape(1000, 0, 26, null),
@@ -396,7 +406,7 @@ class CourseTorrentTest {
                     templeOSAnnounces[0][3] to Failure("scrape: URL connection failed"),
                     templeOSAnnounces[0][4] to Failure("scrape: URL connection failed")))
             }
-        }*/
+        }
     }
 
     companion object {
