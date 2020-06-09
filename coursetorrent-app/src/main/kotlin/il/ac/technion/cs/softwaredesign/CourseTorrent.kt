@@ -8,6 +8,7 @@ import java.security.MessageDigest
 import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
+import java.lang.Exception
 import java.util.concurrent.CompletableFuture
 
 /**
@@ -63,7 +64,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
     fun unload(infohash: String): CompletableFuture<Unit> {
-        return CompletableFuture.supplyAsync {announcesStorage.read(infohash)}.thenCompose { value ->
+        return announcesStorage.read(infohash).thenCompose { value ->
             if (null == value) {
                 throw java.lang.IllegalArgumentException("unload: infohash wasn't loaded")
             }
@@ -129,43 +130,49 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws IllegalArgumentException If [infohash] is not loaded.
      * @return The interval in seconds that the client should wait before announcing again.
      */
-  /*  fun announce(infohash: String, event: TorrentEvent, uploaded: Long, downloaded: Long, left: Long): CompletableFuture<Int> {
-        val announces = announces(infohash)
-        if (event == TorrentEvent.STARTED) {
-            announcesStorage.shuffleTrackers(infohash, announces)
-        }
+    fun announce(infohash: String, event: TorrentEvent, uploaded: Long, downloaded: Long, left: Long): CompletableFuture<Int> {
+        return announces(infohash).thenApply { announces ->
+            if (event == TorrentEvent.STARTED) {
+                announcesStorage.shuffleTrackers(infohash, announces)
+            }
+                announces
+            }.thenCompose{ announces -> announceAux(infohash,event,announces,0,0,uploaded,downloaded,left) }
+    }
 
-        for (announceList:List<String> in announces) {
-            for (tracker:String in announceList) {
-                val url = Announces.createAnnounceURL(infohash, tracker, peerId, uploaded, downloaded, left, event)
-                httpClient.setURL(url)
-                try {
-                    val response = httpClient.getResponse()
-                    val responseDict = (Bencoder(response).decodeResponse()) as HashMap<*, *>
-
-                    if (responseDict.containsKey("failure reason")) {
-                        val reason = responseDict["failure reason"] as String
-                        statisticsStorage.addFailure(infohash, tracker, reason)
-
-                        if (tracker.contentEquals(announces.last().last())) {
-                            // Last tracker
-                            throw TrackerException("announce: " + reason)
-                        }
-                    } else {
-                        peersStorage.addPeers(infohash, responseDict["peers"] as List<Map<*,*>>?)
-                        announcesStorage.moveTrackerToHead(infohash, announces, announceList, tracker)
-                        statisticsStorage.addScrape(responseDict, infohash, tracker)
-                        return (responseDict.getOrDefault("interval", 0) as Int)
-                    }
-                } catch (e: TrackerException) {
-                    throw e
-                } catch (e: Exception) {
-                    statisticsStorage.addFailure(infohash, tracker, "announce: URL connection failed")
+    fun announceAux(infohash: String, event: TorrentEvent, announces: List<List<String>>, tier:Int, trackerIdx:Int,
+                    uploaded: Long, downloaded: Long, left: Long ): CompletableFuture<Int> {
+        if (tier >= announces.size)
+            throw TrackerException("announce: last tracker failed")
+        if (trackerIdx >= announces[tier].size)
+            return announceAux(infohash, event, announces, tier + 1, 0, uploaded, downloaded, left)
+        val tracker = announces[tier][trackerIdx]
+        val future = CompletableFuture.completedFuture(0).thenCompose {
+            val url = Announces.createAnnounceURL(infohash, tracker, peerId, uploaded, downloaded, left, event)
+            httpClient.setURL(url)
+            try {
+                val response = httpClient.getResponse()
+                val responseDict = (Bencoder(response).decodeResponse()) as HashMap<*, *>
+                if (responseDict.containsKey("failure reason")) {
+                    val reason = responseDict["failure reason"] as String
+                    statisticsStorage.addFailure(infohash, tracker, reason).thenApply { Pair(false, 0) }
+                } else {
+                    peersStorage.addPeers(infohash, responseDict["peers"] as List<Map<*, *>>?).thenCompose {
+                    announcesStorage.moveTrackerToHead(infohash, announces, announces[tier], tracker)}.thenCompose {
+                    statisticsStorage.addScrape(responseDict, infohash, tracker) }.thenCompose {
+                    CompletableFuture.completedFuture(Pair(true, responseDict.getOrDefault("interval", 0) as Int)) }
                 }
+            } catch(e: Exception) {
+                statisticsStorage.addFailure(infohash, tracker, "announce: URL connection failed").thenApply { Pair(false,0) }
             }
         }
-        return 0
-    }*/
+        return future.thenCompose { (isDone: Boolean, interval: Int) ->
+            if (isDone) {
+                CompletableFuture.completedFuture(interval)
+            } else {
+                announceAux(infohash, event, announces, tier, trackerIdx+1, uploaded, downloaded, left)
+            }
+        }
+    }
 
     /**
      * Scrape all trackers identified by a torrent, and store the statistics provided. The specification for the scrape
@@ -178,7 +185,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      *
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
- /*   fun scrape(infohash: String): CompletableFuture<Unit> {
+   /* fun scrape(infohash: String): CompletableFuture<Unit> {
         val announces = announces(infohash)
         for (tracker:String in announces.flatten()) {
             val supportsScraping = tracker.substring(tracker.lastIndexOf('/')).startsWith("/announce")
@@ -202,29 +209,29 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
     /**
      * Invalidate a previously known peer for this torrent.
      *
-     * If [peer] is not a known peer for this torrent, do nothing.
+     * If [peer] is not a known  peer for this torrent, do nothing.
      *
      * This is an *update* command.
      *
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
-  /*  fun invalidatePeer(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
+    /*fun invalidatePeer(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
         return announcesStorage.read(infohash).thenApply { value ->
             if (null == value) throw IllegalArgumentException("invalidePeer: infohash wasn't loaded")
         }.thenCompose {
             peersStorage.read(infohash)
         }.thenCompose { peersList ->
             if (null == peersList) {
-                CompletableFuture()
+                CompletableFuture.completedFuture(Unit)
             } else {
                 val updatedPeersList = (Bencoder(peersList).decodeData()) as ArrayList<KnownPeer>
                 if (updatedPeersList.contains(peer)) {
                     updatedPeersList.remove(peer)
                     peersStorage.write(infohash, Bencoder.encodeStr(updatedPeersList).toByteArray())
+                } else {
+                    CompletableFuture.completedFuture(Unit)
                 }
             }
-
-            CompletableFuture.completedFuture(Unit)
         }
     }*/
 

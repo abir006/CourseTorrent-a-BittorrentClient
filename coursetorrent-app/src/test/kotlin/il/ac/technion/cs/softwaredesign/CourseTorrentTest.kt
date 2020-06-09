@@ -30,6 +30,7 @@ class CourseTorrentTest {
         (courseTorrent.peersStorage.database.get() as DBSimulator).clear()
         (courseTorrent.statisticsStorage.database.get() as DBSimulator).clear()
     }
+    /*
     @Nested
     inner class `homework 0 tests` {
         @Nested
@@ -111,11 +112,11 @@ class CourseTorrentTest {
             @Test
             fun `unloading a torrent twice throws an illegal argument`() {
                 val future = assertDoesNotThrow {
-                    courseTorrent.load(exo)
+                    courseTorrent.load(templeOS)
                 }.thenCompose {
-                    courseTorrent.unload(exoInfoHash)
+                    courseTorrent.unload(templeOSInfoHash)
                 }.thenCompose {
-                    courseTorrent.unload(exoInfoHash)
+                    courseTorrent.unload(templeOSInfoHash)
                 }
                 val throwable = assertThrows<ExecutionException> { future.get() }
 
@@ -124,94 +125,100 @@ class CourseTorrentTest {
             }
         }
 
-        /*@Nested
+        @Nested
         inner class `testing announces` {
             @Test
             fun `announces returns a list of lists for a single announce and for announce-list`() {
-                courseTorrent.load(clementine) // Has a single announce
-                courseTorrent.load(kiwiBuntu) // Has an announce-list
-                val clementineList = courseTorrent.announces(clementineInfoHash)
-                val kiwiList = courseTorrent.announces(kiwiInfoHash)
+                courseTorrent.load(templeOS).thenCompose { // Has a single announce
+                courseTorrent.load(kiwiBuntu) }.get() // Has an announce-list
+                val templeList = courseTorrent.announces(templeOSInfoHash).get()
+                val kiwiList = courseTorrent.announces(kiwiInfoHash).get()
 
-                assertThat(clementineList, allElements(hasSize(equalTo(1))))
-                assertThat(clementineList, hasSize(equalTo(1)))
+                assertThat(templeList, allElements(hasSize(equalTo(5))))
+                assertThat(templeList, hasSize(equalTo(1)))
                 assertThat(kiwiList, allElements(hasSize(equalTo(2))))
                 assertThat(kiwiList, hasSize(equalTo(1)))
             }
 
             @Test
             fun `requesting announces of an unloaded torrent throws illegal argument`() {
+                val future = assertDoesNotThrow { courseTorrent.announces(templeOSInfoHash) }
+                val throwable = assertThrows<ExecutionException> { future.get() }
 
-                assertThrows<IllegalArgumentException> { courseTorrent.announces(templeOSInfoHash) }
+                checkNotNull(throwable.cause)
+                assertThat(throwable.cause!!, isA<java.lang.IllegalArgumentException>())
             }
 
             @Test
             fun `announces of numerous loaded torrents should return a correct and pre-known list`() {
-                courseTorrent.load(kiwiBuntu)
-                courseTorrent.load(debian)
-                courseTorrent.load(templeOS)
+                courseTorrent.load(kiwiBuntu).thenCompose {
+                courseTorrent.load(debian) }.thenCompose {
+                courseTorrent.load(templeOS) }.get()
 
-                val kiwiList = courseTorrent.announces(kiwiInfoHash)
-                val debianList = courseTorrent.announces(debianInfoHash)
-                val templeOSList = courseTorrent.announces(templeOSInfoHash)
+                val kiwiList = courseTorrent.announces(kiwiInfoHash).get()
+                val debianList = courseTorrent.announces(debianInfoHash).get()
+                val templeOSList = courseTorrent.announces(templeOSInfoHash).get()
 
                 assertThat(kiwiList, equalTo(kiwiAnnounces))
                 assertThat(debianList, equalTo(debianAnnounces))
                 assertThat(templeOSList, equalTo(templeOSAnnounces))
             }
-        }*/
+        }
 
-        /*@Nested
+        @Nested
         inner class `testing persistence` {
             @Test
             fun `loaded torrent is persistent after restart and valid for reading`() {
-                courseTorrent.load(kiwiBuntu)
+                courseTorrent.load(kiwiBuntu).get()
                 courseTorrent = injector.getInstance<CourseTorrent>()
 
                 assertThat(
-                    String(courseTorrent.announcesStorage.read(kiwiInfoHash) ?: ByteArray(0)),
+                    String(courseTorrent.announcesStorage.read(kiwiInfoHash).get() ?: ByteArray(0)),
                     equalTo(kiwiAnnouncesBytes)
                 )
             }
 
             @Test
             fun `requesting announces for a torrent loaded before restart should work`() {
-                courseTorrent.load(exo)
+                courseTorrent.load(kiwiBuntu).get()
                 courseTorrent = injector.getInstance<CourseTorrent>()
 
-                assertThat(courseTorrent.announces(exoInfoHash), equalTo(exoAnnounces))
+                assertThat(courseTorrent.announces(kiwiInfoHash).get(), equalTo(kiwiAnnounces))
             }
 
             @Test
             fun `unloading a torrent loaded before restart should work`() {
-                courseTorrent.load(templeOS)
+                courseTorrent.load(templeOS).get()
                 courseTorrent = injector.getInstance<CourseTorrent>()
-                courseTorrent.unload(templeOSInfoHash)
+                courseTorrent.unload(templeOSInfoHash).get()
 
-                assertNull(courseTorrent.announcesStorage.read(templeOSInfoHash))
+                assertNull(courseTorrent.announcesStorage.read(templeOSInfoHash).get())
             }
-        }*/
-    }
+        }
+    }*/
 
-    /*@Nested
+    @Nested
     inner class `homework 1 tests` {
-
-
         @Nested
         inner class `testing announce functionality` {
             @Test
             fun `throws IllegalArgumentException when infohash not loaded on announce`(){
                 every { courseTorrent.httpClient.getResponse() } returns bencodedFailureAnnounceResponse.toByteArray()
+                val future = assertDoesNotThrow {
+                    courseTorrent.announce(debianInfoHash, TorrentEvent.STARTED, 10, 12, 14) }
+                val throwable = assertThrows<ExecutionException> { future.get() }
 
-                assertThrows<IllegalArgumentException> {courseTorrent.announce(debianInfoHash, TorrentEvent.STARTED, 10, 12, 14) }
+                checkNotNull(throwable.cause)
+                assertThat(throwable.cause!!, isA<java.lang.IllegalArgumentException>())
             }
+
 
             @Test
             fun `correct interval value after simple announce`() {
                 every { courseTorrent.httpClient.getResponse() } returns bencodedSimpleAnnounceResponse.toByteArray()
-                val info = courseTorrent.load(debian)
+                val info = courseTorrent.load(debian).get()
 
-                val interval = courseTorrent.announce(info, TorrentEvent.STARTED, 10, 12, 14)
+                val interval = courseTorrent.announce(info, TorrentEvent.STARTED, 10, 12, 14).get()
 
                 assertEquals(interval, 62)
             }
@@ -219,62 +226,65 @@ class CourseTorrentTest {
             @Test
             fun `correct peers after announce for torrent with single valid tracker`() {
                 every { courseTorrent.httpClient.getResponse() } returns bencodedSimpleAnnounceResponse.toByteArray()
-                val info = courseTorrent.load(debian)
+                val info = courseTorrent.load(debian).get()
 
-                courseTorrent.announce(info, TorrentEvent.STARTED, 10, 12, 14)
+                courseTorrent.announce(info, TorrentEvent.STARTED, 10, 12, 14).get()
 
-                assert((courseTorrent.peersStorage.read(info) as ByteArray).contentEquals(bencodedSimpleAnnouncePeerList.toByteArray()))
+                assert((courseTorrent.peersStorage.read(info).get() as ByteArray).contentEquals(bencodedSimpleAnnouncePeerList.toByteArray()))
             }
 
             @Test
             fun `correct scrape after announce for torrent with single valid tracker`() {
-                val info = courseTorrent.load(debian)
+                val info = courseTorrent.load(debian).get()
                 every { courseTorrent.httpClient.getResponse() } returns bencodedSimpleAnnounceResponse.toByteArray()
 
-                courseTorrent.announce(info, TorrentEvent.STARTED, 10, 12, 14)
+                courseTorrent.announce(info, TorrentEvent.STARTED, 10, 12, 14).get()
 
-                assert((courseTorrent.statisticsStorage.read(info + "_" + debianAnnounces[0][0]) as ByteArray).
+                assert((courseTorrent.statisticsStorage.read(info + "_" + debianAnnounces[0][0]).get() as ByteArray).
                     contentEquals(bencodedSimpleAnnounceScrape.toByteArray()))
             }
 
             @Test
             fun `throws failure with reason when all the torrent trackers fail announce`() {
-                val info = courseTorrent.load(debian)
+                val info = courseTorrent.load(debian).get()
                 every { courseTorrent.httpClient.getResponse() } returns bencodedFailureAnnounceResponse.toByteArray()
+                val future = assertDoesNotThrow {
+                    courseTorrent.announce(info, TorrentEvent.STARTED, 10, 12, 14) }
+                val throwable = assertThrows<ExecutionException> { future.get() }
 
-                assertThrows<TrackerException>("we need to test it" ,
-                    {courseTorrent.announce(info, TorrentEvent.STARTED, 10, 12, 14) })
+                checkNotNull(throwable.cause)
+                assertThat(throwable.cause!!, isA<TrackerException>())
             }
 
             @Test
             fun `correct interval value for torrent a tracker that fails and a tracker that succeeds`() {
-                val info = courseTorrent.load(kiwiBuntu)
+                val info = courseTorrent.load(kiwiBuntu).get()
                 every { courseTorrent.httpClient.getResponse() } returnsMany listOf(
                     bencodedFailureAnnounceResponse.toByteArray(),
                     bencodedSimpleAnnounceResponse.toByteArray())
 
-                val interval = courseTorrent.announce(info, TorrentEvent.STOPPED, 10, 12, 14)
+                val interval = courseTorrent.announce(info, TorrentEvent.STOPPED, 10, 12, 14).get()
 
                 assertEquals(interval,62)
             }
 
             @Test
             fun `statistic storage correct after first tracker fails and second succeeds`() {
-                val info = courseTorrent.load(kiwiBuntu)
+                val info = courseTorrent.load(kiwiBuntu).get()
                 every { courseTorrent.httpClient.getResponse() } returnsMany listOf(
                     bencodedFailureAnnounceResponse.toByteArray(),
                     bencodedSimpleAnnounceResponse.toByteArray())
 
-                val res = courseTorrent.announce(info, TorrentEvent.STOPPED, 10, 12, 14)
+                val res = courseTorrent.announce(info, TorrentEvent.STOPPED, 10, 12, 14).get()
 
-                assert((courseTorrent.statisticsStorage.read(info + "_" + kiwiAnnounces[0][0]) as ByteArray)
+                assert((courseTorrent.statisticsStorage.read(info + "_" + kiwiAnnounces[0][0]).get() as ByteArray)
                     .contentEquals(bencodedFailureScrape.toByteArray()))
-                assert((courseTorrent.statisticsStorage.read(info + "_" + kiwiAnnounces[0][1]) as ByteArray)
+                assert((courseTorrent.statisticsStorage.read(info + "_" + kiwiAnnounces[0][1]).get() as ByteArray)
                     .contentEquals(bencodedSimpleAnnounceScrape.toByteArray()))
             }
         }
 
-
+        /*
         @Nested
         inner class `testing scrape functionality`{
             @Test
@@ -386,8 +396,8 @@ class CourseTorrentTest {
                     templeOSAnnounces[0][3] to Failure("scrape: URL connection failed"),
                     templeOSAnnounces[0][4] to Failure("scrape: URL connection failed")))
             }
-        }
-    }*/
+        }*/
+    }
 
     companion object {
         val debian = this::class.java.getResource("/debian-10.3.0-amd64-netinst.iso.torrent").readBytes()
