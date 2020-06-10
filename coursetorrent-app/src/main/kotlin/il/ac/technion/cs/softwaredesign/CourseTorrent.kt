@@ -21,7 +21,8 @@ import java.util.concurrent.CompletableFuture
  */
 class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                                         val peersStorage: Peers,
-                                        val statisticsStorage: Statistics,
+                                        val trackerStatisticsStorage: TrackerStatistics,
+                                        val torrentStatisticsStorage: TorrentStatistics,
                                         val httpClient: HttpClient) {
     companion object {
         private val md = MessageDigest.getInstance("SHA-1")
@@ -157,18 +158,18 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                 val responseDict = (Bencoder(response).decodeResponse()) as HashMap<*, *>
                 if (responseDict.containsKey("failure reason")) {
                     val reason = responseDict["failure reason"] as String
-                    statisticsStorage.addFailure(infohash, tracker, reason).thenApply { Pair(false, 0) }
+                    trackerStatisticsStorage.addFailure(infohash, tracker, reason).thenApply { Pair(false, 0) }
                 } else {
                     peersStorage.addPeers(infohash, responseDict["peers"] as List<Map<*, *>>?).thenCompose {
                         announcesStorage.moveTrackerToHead(infohash, announces, announces[tier], tracker)
                     }.thenCompose {
-                        statisticsStorage.addScrape(responseDict, infohash, tracker)
+                        trackerStatisticsStorage.addScrape(responseDict, infohash, tracker)
                     }.thenCompose {
                         CompletableFuture.completedFuture(Pair(true, responseDict.getOrDefault("interval", 0) as Int))
                     }
                 }
             } catch(e: Exception) {
-                statisticsStorage.addFailure(infohash, tracker, "announce: URL connection failed").thenApply { Pair(false, 0) }
+                trackerStatisticsStorage.addFailure(infohash, tracker, "announce: URL connection failed").thenApply { Pair(false, 0) }
             }
         }
         return future.thenCompose { (isDone: Boolean, interval: Int) ->
@@ -198,18 +199,18 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                 future = future.thenCompose {
                     val supportsScraping = tracker.substring(tracker.lastIndexOf('/')).startsWith("/announce")
                     if (supportsScraping) {
-                        val url = Statistics.createScrapeURL(infohash, tracker)
+                        val url = TrackerStatistics.createScrapeURL(infohash, tracker)
                         httpClient.setURL(url)
                         try {
                             val response = (Bencoder(httpClient.getResponse()).decodeResponse()) as HashMap<*, *>
                             val responseDict = (response["files"] as HashMap<*, *>).values.first() as HashMap<*, *>
-                            statisticsStorage.addScrape(responseDict, infohash, tracker)
+                            trackerStatisticsStorage.addScrape(responseDict, infohash, tracker)
                         } catch (e: Exception) {
-                            statisticsStorage.addFailure(infohash, tracker, "scrape: URL connection failed")
+                            trackerStatisticsStorage.addFailure(infohash, tracker, "scrape: URL connection failed")
                         }
                     } else {
                         // Tracker doesn't support scraping
-                        statisticsStorage.addFailure(infohash, tracker, "scrape: URL connection failed")
+                        trackerStatisticsStorage.addFailure(infohash, tracker, "scrape: URL connection failed")
                     }
                 }
             }
@@ -297,7 +298,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
             var future = CompletableFuture.completedFuture(hashMapOf<String, ScrapeData>())
             for (tracker in trackers.flatten()) {
                 future = future.thenCompose { statsMap ->
-                    statisticsStorage.read(infohash + "_" + tracker).thenApply { scrapeData ->
+                    trackerStatisticsStorage.read(infohash + "_" + tracker).thenApply { scrapeData ->
                         if (null != scrapeData)
                             statsMap[tracker] = Bencoder(scrapeData).decodeData() as ScrapeData
                         statsMap

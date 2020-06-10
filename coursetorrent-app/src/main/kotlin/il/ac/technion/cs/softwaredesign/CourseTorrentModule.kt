@@ -24,8 +24,13 @@ class CourseTorrentModule : KotlinModule() {
         return Storage(factory.open("PeersDB".toByteArray()))
     }
 
-    @Provides @Inject @StatisticsSecureStorage
-    fun providesStatistics(factory: SecureStorageFactory): Storage {
-        return Storage(factory.open("StatisticsDB".toByteArray()))
+    @Provides @Inject @TrackerStatisticsSecureStorage
+    fun providesTrackerStatistics(factory: SecureStorageFactory): Storage {
+        return Storage(factory.open("TrackerStatisticsDB".toByteArray()))
+    }
+
+    @Provides @Inject @TorrentStatisticsSecureStorage
+    fun providesTorrentStatistics(factory: SecureStorageFactory): Storage {
+        return Storage(factory.open("TorrentStatisticsDB".toByteArray()))
     }
 }

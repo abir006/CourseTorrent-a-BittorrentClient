@@ -11,7 +11,6 @@ import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
 import io.mockk.*
 import org.junit.jupiter.api.*
 import org.junit.jupiter.api.Assertions.*
-import java.util.concurrent.CompletionException
 import java.util.concurrent.ExecutionException
 import org.junit.jupiter.api.assertDoesNotThrow
 
@@ -28,7 +27,7 @@ class CourseTorrentTest {
         mockkObject(courseTorrent.announcesStorage)
         (courseTorrent.announcesStorage.database.get() as DBSimulator).clear()
         (courseTorrent.peersStorage.database.get() as DBSimulator).clear()
-        (courseTorrent.statisticsStorage.database.get() as DBSimulator).clear()
+        (courseTorrent.trackerStatisticsStorage.database.get() as DBSimulator).clear()
     }
 
     @Nested
@@ -241,7 +240,7 @@ class CourseTorrentTest {
 
                 courseTorrent.announce(info, TorrentEvent.STARTED, 10, 12, 14).get()
 
-                assert((courseTorrent.statisticsStorage.read(info + "_" + debianAnnounces[0][0]).get() as ByteArray).
+                assert((courseTorrent.trackerStatisticsStorage.read(info + "_" + debianAnnounces[0][0]).get() as ByteArray).
                     contentEquals(bencodedSimpleAnnounceScrape.toByteArray()))
             }
 
@@ -278,9 +277,9 @@ class CourseTorrentTest {
 
                 val res = courseTorrent.announce(info, TorrentEvent.STOPPED, 10, 12, 14).get()
 
-                assert((courseTorrent.statisticsStorage.read(info + "_" + kiwiAnnounces[0][0]).get() as ByteArray)
+                assert((courseTorrent.trackerStatisticsStorage.read(info + "_" + kiwiAnnounces[0][0]).get() as ByteArray)
                     .contentEquals(bencodedFailureScrape.toByteArray()))
-                assert((courseTorrent.statisticsStorage.read(info + "_" + kiwiAnnounces[0][1]).get() as ByteArray)
+                assert((courseTorrent.trackerStatisticsStorage.read(info + "_" + kiwiAnnounces[0][1]).get() as ByteArray)
                     .contentEquals(bencodedSimpleAnnounceScrape.toByteArray()))
             }
         }
@@ -305,7 +304,7 @@ class CourseTorrentTest {
 
                 courseTorrent.scrape(info).get()
 
-                assert((courseTorrent.statisticsStorage.read(info + "_" + debianAnnounces[0][0]).get() as ByteArray)
+                assert((courseTorrent.trackerStatisticsStorage.read(info + "_" + debianAnnounces[0][0]).get() as ByteArray)
                     .contentEquals(bencodedSimpleScrape.toByteArray()))
             }
 
@@ -317,7 +316,7 @@ class CourseTorrentTest {
                 courseTorrent.scrape(info).get()
 
                 for (tracker in templeOSAnnounces.flatten()) { assert(
-                    (courseTorrent.statisticsStorage.read(info + "_" + tracker).get() as ByteArray).
+                    (courseTorrent.trackerStatisticsStorage.read(info + "_" + tracker).get() as ByteArray).
                         contentEquals(bencodedUrlFailScrape.toByteArray()))
                 }
             }

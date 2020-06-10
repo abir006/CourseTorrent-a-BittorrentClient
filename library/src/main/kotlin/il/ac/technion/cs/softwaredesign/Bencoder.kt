@@ -1,6 +1,7 @@
 package il.ac.technion.cs.softwaredesign
 
 import java.lang.IllegalArgumentException
+import java.time.Duration
 
 //TODO: maybe we want to add details of the returned dicts? from https://wiki.theory.org/index.php/BitTorrentSpecification
 
@@ -130,20 +131,21 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
             }
         }
         's' -> {
-            var tmpMap = HashMap<String, Any?>().apply {
+            val tmpMap = HashMap<String, Any?>().apply {
                 var obj = this@Bencoder.decodeData()
                 while (obj != Unit) {
                     put(obj as String, this@Bencoder.decodeData())
                     obj = this@Bencoder.decodeData()
                 }
             }
-            Scrape(tmpMap["complete"] as Int,
+            Scrape(
+                tmpMap["complete"] as Int,
                 tmpMap["downloaded"] as Int,
                 tmpMap["incomplete"] as Int,
                 tmpMap["name"] as String?)
         }
         'f' -> {
-            var tmpMap = HashMap<String, Any?>().apply {
+            val tmpMap = HashMap<String, Any?>().apply {
                 var obj = this@Bencoder.decodeData()
                 while (obj != Unit) {
                     put(obj as String, this@Bencoder.decodeData())
@@ -153,16 +155,37 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
             Failure(tmpMap["failure reason"] as String)
         }
         'k' -> {
-            var tmpMap = HashMap<String, Any?>().apply {
+            val tmpMap = HashMap<String, Any?>().apply {
                 var obj = this@Bencoder.decodeData()
                 while (obj != Unit) {
                     put(obj as String, this@Bencoder.decodeData())
                     obj = this@Bencoder.decodeData()
                 }
             }
-            KnownPeer(tmpMap["ip"] as String,
+            KnownPeer(
+                tmpMap["ip"] as String,
                 tmpMap["port"] as Int,
                 tmpMap["peerId"] as String?)
+        }
+        't' -> {
+            val tmpMap = HashMap<String, Any?>().apply {
+                var obj = this@Bencoder.decodeData()
+                while (obj != Unit) {
+                    put(obj as String, this@Bencoder.decodeData())
+                    obj = this@Bencoder.decodeData()
+                }
+            }
+            TorrentStats(
+                tmpMap["uploaded"] as Long,
+                tmpMap["downloaded"] as Long,
+                tmpMap["left"] as Long,
+                tmpMap["wasted"] as Long,
+                tmpMap["shareRatio"] as Double,
+                tmpMap["pieces"] as Long,
+                tmpMap["havePieces"] as Long,
+                tmpMap["leechTime"] as Duration,
+                tmpMap["seedTime"] as Duration
+            )
         }
         'n' -> null
         'e' -> Unit
@@ -187,7 +210,7 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
                 tmpMap["incomplete"] = obj.incomplete
                 tmpMap["name"] = obj.name
                 "s${tmpMap.map { encodeStr(it.key!!) + encodeStr(it.value) }.joinToString("")}e"
-        }
+            }
             is KnownPeer -> {
                 val tmpMap = HashMap<String, Any?>()
                 tmpMap["ip"] = obj.ip
@@ -200,10 +223,23 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
                 tmpMap["failure reason"] = obj.reason
                 "f${tmpMap.map { encodeStr(it.key!!) + encodeStr(it.value!!) }.joinToString("")}e"
             }
+            is TorrentStats -> {
+                val tmpMap = HashMap<String, Any>()
+                tmpMap["uploaded"] = obj.uploaded
+                tmpMap["downloaded"] = obj.downloaded
+                tmpMap["left"] = obj.left
+                tmpMap["wasted"] = obj.wasted
+                tmpMap["shareRatio"] = obj.shareRatio
+                tmpMap["pieces"] = obj.pieces
+                tmpMap["havePieces"] = obj.havePieces
+                tmpMap["leechTime"] = obj.leechTime
+                tmpMap["seedTime"] = obj.seedTime
+                "t${tmpMap.map { encodeStr(it.key!!) + encodeStr(it.value!!) }.joinToString("")}e"
+            }
             else -> {
-                if(obj == null){
+                if (obj == null) {
                     "n"
-                }else {
+                } else {
                     throw IllegalArgumentException()
                 }
             }

@@ -15,5 +15,10 @@ annotation class PeersSecureStorage
 @Target(AnnotationTarget.VALUE_PARAMETER, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 @BindingAnnotation
-annotation class StatisticsSecureStorage
+annotation class TrackerStatisticsSecureStorage
+
+@Target(AnnotationTarget.VALUE_PARAMETER, AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+@BindingAnnotation
+annotation class TorrentStatisticsSecureStorage
 

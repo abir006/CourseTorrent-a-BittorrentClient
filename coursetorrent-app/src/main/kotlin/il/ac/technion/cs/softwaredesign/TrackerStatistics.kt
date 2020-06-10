@@ -8,7 +8,7 @@ import java.util.concurrent.CompletableFuture
 /**
  * A wrapper class to storage of the form infohash_tracker->ScrapeData, that includes additional methods for handling stats.
  */
-class Statistics @Inject constructor(@StatisticsSecureStorage storage: Storage) : Storage(storage.database) {
+class TrackerStatistics @Inject constructor(@TrackerStatisticsSecureStorage storage: Storage) : Storage(storage.database) {
     /**
      * Receives the entire response dictionary of a tracker's response, the relevant tracker and the related infohash.
      * Updates the storage with the bencoded Scrape from the relevant data in the response dictionary.
