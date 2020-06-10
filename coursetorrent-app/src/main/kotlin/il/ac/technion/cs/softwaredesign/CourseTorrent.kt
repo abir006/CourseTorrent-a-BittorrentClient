@@ -48,7 +48,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         }.thenCompose { (infohash, announcements) ->
             announcesStorage.read(infohash).thenApply { value ->
                 if (null != value) {
-                    throw IllegalStateException("load: infohash was already loaded") // TODO deal with exception
+                    throw IllegalStateException("load: infohash was already loaded")
                 }
                 announcesStorage.write(infohash, announcements)
                 infohash
@@ -63,6 +63,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      *
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
+    // TODO should remove entries from Statistics/Peers?
     fun unload(infohash: String): CompletableFuture<Unit> {
         return announcesStorage.read(infohash).thenCompose { value ->
             if (null == value) {
@@ -135,8 +136,10 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
             if (event == TorrentEvent.STARTED) {
                 announcesStorage.shuffleTrackers(infohash, announces)
             }
-                announces
-            }.thenCompose{ announces -> announceAux(infohash,event,announces,0,0,uploaded,downloaded,left) }
+            announces
+        }.thenCompose { announces ->
+            announceAux(infohash,event,announces,0,0,uploaded,downloaded,left)
+        }
     }
 
     private fun announceAux(infohash: String, event: TorrentEvent, announces: List<List<String>>, tier:Int, trackerIdx:Int,
@@ -157,12 +160,15 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                     statisticsStorage.addFailure(infohash, tracker, reason).thenApply { Pair(false, 0) }
                 } else {
                     peersStorage.addPeers(infohash, responseDict["peers"] as List<Map<*, *>>?).thenCompose {
-                    announcesStorage.moveTrackerToHead(infohash, announces, announces[tier], tracker)}.thenCompose {
-                    statisticsStorage.addScrape(responseDict, infohash, tracker) }.thenCompose {
-                    CompletableFuture.completedFuture(Pair(true, responseDict.getOrDefault("interval", 0) as Int)) }
+                        announcesStorage.moveTrackerToHead(infohash, announces, announces[tier], tracker)
+                    }.thenCompose {
+                        statisticsStorage.addScrape(responseDict, infohash, tracker)
+                    }.thenCompose {
+                        CompletableFuture.completedFuture(Pair(true, responseDict.getOrDefault("interval", 0) as Int))
+                    }
                 }
             } catch(e: Exception) {
-                statisticsStorage.addFailure(infohash, tracker, "announce: URL connection failed").thenApply { Pair(false,0) }
+                statisticsStorage.addFailure(infohash, tracker, "announce: URL connection failed").thenApply { Pair(false, 0) }
             }
         }
         return future.thenCompose { (isDone: Boolean, interval: Int) ->
@@ -186,7 +192,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
     fun scrape(infohash: String): CompletableFuture<Unit> {
-        return announces(infohash).thenCompose{ announces ->
+        return announces(infohash).thenCompose { announces ->
             var future = CompletableFuture.completedFuture(Unit)
             for (tracker: String in announces.flatten()) {
                 future = future.thenCompose {
