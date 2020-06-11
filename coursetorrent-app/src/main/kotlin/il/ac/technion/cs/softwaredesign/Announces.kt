@@ -49,12 +49,12 @@ class Announces @Inject constructor(@AnnouncesSecureStorage storage: Storage) : 
          * Creates a complete url in order to announce the given tracker of the torrent identified by the infohash, with
          * the desired parameters.
          */
-        fun createAnnounceURL(infohash: String, tracker:String, peerId: String, uploaded: Long,
+        fun createAnnounceURL(infohash: String, tracker:String, peerId: String, port: String, uploaded: Long,
                                       downloaded: Long, left: Long, event: TorrentEvent) : String {
             val encodedInfohash = hexToURL(infohash)
             val query: String = "info_hash=$encodedInfohash" +
                     "&peer_id=$peerId" +
-                    "&port=$6882" +
+                    "&port=$port" +
                     "&uploaded=$uploaded" +
                     "&downloaded=$downloaded" +
                     "&left=$left" +

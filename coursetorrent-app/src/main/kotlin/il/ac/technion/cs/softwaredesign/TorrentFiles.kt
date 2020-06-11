@@ -7,6 +7,6 @@ import java.util.concurrent.CompletableFuture
 /**
  * A wrapper class to storage of the form infohash->TorrentStats.
  */
-class TorrentStatistics @Inject constructor(@TorrentStatisticsSecureStorage  storage: Storage) : Storage(storage.database) {
+class TorrentFiles @Inject constructor(@TorrentFilesSecureStorage  storage: Storage) : Storage(storage.database) {
 
 }

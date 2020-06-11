@@ -9,6 +9,8 @@ import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
 import java.lang.Exception
+import java.net.ServerSocket
+import java.net.Socket
 import java.util.concurrent.CompletableFuture
 
 /**
@@ -23,13 +25,20 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                                         val peersStorage: Peers,
                                         val trackerStatisticsStorage: TrackerStatistics,
                                         val torrentStatisticsStorage: TorrentStatistics,
+                                        val torrentFilesStorage: TorrentFiles,
                                         val httpClient: HttpClient) {
     companion object {
         private val md = MessageDigest.getInstance("SHA-1")
         private val studentId = byteArray2Hex(md.digest((204596597 + 311242440).toString().toByteArray())).take(6)
         private val randomGenerated = (1..6).map{(('A'..'Z')+('a'..'z')+('0'..'9')).random()}.joinToString("")
     }
+
     private val peerId = "-CS1000-$studentId$randomGenerated"
+    private val port = "6882" // TODO change? randomize?
+    private var serverSocket: ServerSocket? = null
+    private val sockets: HashMap<String, HashMap<KnownPeer, Socket>> = hashMapOf() // TODO KnownPeer, since connect receives KnownPeer
+    private val peerBitMaps: HashMap<String, HashMap<KnownPeer, ByteArray>> = hashMapOf()
+    private var bitmap: HashMap<String, ByteArray?> = hashMapOf()
 
     /**
      * Load in the torrent metainfo file from [torrent]. The specification for these files can be found here:
@@ -92,7 +101,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         return announcesStorage.read(infohash).thenApply { announcesRaw ->
             if (null == announcesRaw) throw IllegalArgumentException("announces: infohash wasn't loaded")
             val bencoder = Bencoder(announcesRaw)
-            bencoder.decodeTorrent()
+            bencoder.decodeData()
         }.thenCompose { announces ->
             if (announces is String) {
                 CompletableFuture.completedFuture(listOf(listOf(announces)))
@@ -143,15 +152,16 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         }
     }
 
+    @Suppress("UNCHECKED_CAST")
     private fun announceAux(infohash: String, event: TorrentEvent, announces: List<List<String>>, tier:Int, trackerIdx:Int,
-                    uploaded: Long, downloaded: Long, left: Long ): CompletableFuture<Int> {
+                            uploaded: Long, downloaded: Long, left: Long ): CompletableFuture<Int> {
         if (tier >= announces.size)
             throw TrackerException("announce: last tracker failed")
         if (trackerIdx >= announces[tier].size)
             return announceAux(infohash, event, announces, tier + 1, 0, uploaded, downloaded, left)
         val tracker = announces[tier][trackerIdx]
         val future = CompletableFuture.completedFuture(0).thenCompose {
-            val url = Announces.createAnnounceURL(infohash, tracker, peerId, uploaded, downloaded, left, event)
+            val url = Announces.createAnnounceURL(infohash, tracker, peerId, port, uploaded, downloaded, left, event)
             httpClient.setURL(url)
             try {
                 val response = httpClient.getResponse()
@@ -227,6 +237,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      *
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
+    @Suppress("UNCHECKED_CAST")
     fun invalidatePeer(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
         return announcesStorage.read(infohash).thenApply { value ->
             if (null == value) throw IllegalArgumentException("invalidePeer: infohash wasn't loaded")
@@ -260,6 +271,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws IllegalArgumentException If [infohash] is not loaded.
      * @return Sorted list of known peers.
      */
+    @Suppress("UNCHECKED_CAST")
     fun knownPeers(infohash: String): CompletableFuture<List<KnownPeer>> {
         return announcesStorage.read(infohash).thenCompose { value ->
             if (null == value) throw IllegalArgumentException("announces: infohash wasn't loaded")
@@ -320,7 +332,13 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws IllegalArgumentException if [infohash] is not loaded.
      * @return Torrent statistics.
      */
-    fun torrentStats(infohash: String): CompletableFuture<TorrentStats> = TODO("Implement me!")
+    fun torrentStats(infohash: String): CompletableFuture<TorrentStats> {
+        return torrentStatisticsStorage.read(infohash).thenApply { torrentStatsRaw ->
+            if (null == torrentStatsRaw) throw IllegalArgumentException("torrentStats: infohash wasn't loaded")
+            val bencoder = Bencoder(torrentStatsRaw)
+            bencoder.decodeData() as TorrentStats
+        }
+    }
 
     /**
      * Start listening for peer connections on a chosen port.
@@ -334,7 +352,14 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      *
      * @throws IllegalStateException If already listening.
      */
-    fun start(): CompletableFuture<Unit> = TODO("Implement me!")
+    fun start(): CompletableFuture<Unit> {
+        return CompletableFuture.supplyAsync {
+            if (null != serverSocket) {
+                throw java.lang.IllegalStateException("start: client is already listening on the specified port")
+            }
+            serverSocket = ServerSocket(port.toInt()) // Socket server to allow peers to connect to courseTorrent
+        }
+    }
 
     /**
      * Disconnect from all connected peers, and stop listening for new peer connections
@@ -371,11 +396,38 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws IllegalArgumentException if [infohash] is not loaded or [peer] is not known.
      * @throws PeerConnectException if the connection to [peer] failed (timeout, connection closed after handshake, etc.)
      */
-    fun connect(infohash: String, peer: KnownPeer): CompletableFuture<Unit> = TODO("Implement me!")
+    fun connect(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
+        return knownPeers(infohash).thenCompose { peersList ->
+            if (!peersList.contains(peer)) {
+                throw IllegalArgumentException("connect: peer is not known")
+            }
+            announcesStorage.read(infohash)
+        }.thenCompose { value ->
+            if (null == value) {
+                throw IllegalArgumentException("connect: infohash is not loaded")
+            }
+            try {
+                val socket = Socket(peer.ip, peer.port)
+                val socketOutputStream = socket.getOutputStream()
+                //TODO: infohash to byte array or infohash hex2bytearray and peerId also ?
+                socketOutputStream.write(WireProtocolEncoder.handshake(infohash.toByteArray(), peerId.toByteArray()))
+                val response = socket.getInputStream().readAllBytes()
+                if (WireProtocolDecoder.handshake(response).infohash.contentEquals(infohash.toByteArray())) {
+                    //TODO: how to get bitmap out of message \ create message with bit map
+                    val map = sockets[infohash] ?: hashMapOf()
+                    map[peer] = socket
+                    sockets[infohash] = map
+                }
+            } catch (e: Exception) {
+                throw PeerConnectException("connect: connection to peer failed")
+            }
+            CompletableFuture.completedFuture(Unit)
+        }
+    }
 
     /**
      * Disconnect from [peer] by closing the connection.
-     *
+     *ז
      * There is no need to send any messages.
      *
      * This is an *update* command. (maybe)

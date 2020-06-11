@@ -28,6 +28,7 @@ class CourseTorrentTest {
         (courseTorrent.announcesStorage.database.get() as DBSimulator).clear()
         (courseTorrent.peersStorage.database.get() as DBSimulator).clear()
         (courseTorrent.trackerStatisticsStorage.database.get() as DBSimulator).clear()
+        (courseTorrent.torrentStatisticsStorage.database.get() as DBSimulator).clear()
     }
 
     @Nested

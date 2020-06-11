@@ -33,4 +33,9 @@ class CourseTorrentModule : KotlinModule() {
     fun providesTorrentStatistics(factory: SecureStorageFactory): Storage {
         return Storage(factory.open("TorrentStatisticsDB".toByteArray()))
     }
+
+    @Provides @Inject @TorrentFilesSecureStorage
+    fun providesTorrentFiles(factory: SecureStorageFactory): Storage {
+        return Storage(factory.open("TorrentFilesDB".toByteArray()))
+    }
 }

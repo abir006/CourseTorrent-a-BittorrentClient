@@ -26,8 +26,18 @@ class CourseTorrentTestModule : KotlinModule() {
         return Storage(CompletableFuture.completedFuture(DBSimulator("PeersStorage-Test")))
     }
 
-    @Provides @Inject @StatisticsSecureStorage
-    fun providesStatistics(): Storage {
-        return Storage(CompletableFuture.completedFuture(DBSimulator("StatisticsStorage-Test")))
+    @Provides @Inject @TrackerStatisticsSecureStorage
+    fun providesTrackerStatistics(): Storage {
+        return Storage(CompletableFuture.completedFuture(DBSimulator("TrackerStatisticsStorage-Test")))
+    }
+
+    @Provides @Inject @TorrentStatisticsSecureStorage
+    fun providesTorrentStatistics(): Storage {
+        return Storage(CompletableFuture.completedFuture(DBSimulator("TorrentStatisticsStorage-Test")))
+    }
+
+    @Provides @Inject @TorrentFilesSecureStorage
+    fun providesTorrentFiles(): Storage {
+        return Storage(CompletableFuture.completedFuture(DBSimulator("TorrentFilesStorage-Test")))
     }
 }
