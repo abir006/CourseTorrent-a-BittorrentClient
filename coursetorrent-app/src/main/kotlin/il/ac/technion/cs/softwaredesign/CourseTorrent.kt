@@ -1,4 +1,4 @@
-@file:Suppress("UNUSED_PARAMETER")
+@file:Suppress("UNCHECKED_CAST")
 
 package il.ac.technion.cs.softwaredesign
 
@@ -54,7 +54,6 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws IllegalStateException If the infohash of [torrent] is already loaded.
      * @return The infohash of the torrent, i.e., the SHA-1 of the `info` key of [torrent].
      */
-    @Suppress("UNCHECKED_CAST")
     fun load(torrent: ByteArray): CompletableFuture<String> {
         return CompletableFuture.supplyAsync {
             parseTorrent(torrent)
@@ -105,7 +104,6 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         }
     }
 
-
     /**
      * Remove the torrent identified by [infohash] from the system.
      *
@@ -113,20 +111,20 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      *
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
-    // TODO added delete from more storages, might want to add more depending on how many we will have (Abir)
+    // TODO make sure all storages are cleared
     fun unload(infohash: String): CompletableFuture<Unit> {
-        return announcesStorage.read(infohash).thenCompose { announces  ->
-            if (null == announces) {
-                throw java.lang.IllegalArgumentException("unload: infohash wasn't loaded")
-            }
+        return announces(infohash).thenCompose { announces  ->
             var future = CompletableFuture.completedFuture(Unit)
-            for(trackerTier in announces  as List<List<String>>){
-                for(tracker in trackerTier){
-                   future = future.thenCompose {
-                       trackerStatisticsStorage.delete(infohash + "_" + tracker) }
+            announces as List<List<String>>
+            announces.forEach { trackerTier: List<String> ->
+                trackerTier.forEach { tracker ->
+                    future = future.thenCompose {
+                        trackerStatisticsStorage.delete(infohash + "_" + tracker) }
                 }
             }
             future
+        }.exceptionally {
+            throw IllegalArgumentException("unload: infohash isn't loaded")
         }.thenCompose {
             peersStorage.delete(infohash)
         }.thenCompose {
@@ -151,7 +149,6 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws IllegalArgumentException If [infohash] is not loaded.
      * @return Tier lists of announce URLs.
      */
-    @Suppress("UNCHECKED_CAST")
     fun announces(infohash: String): CompletableFuture<List<List<String>>> {
         return announcesStorage.read(infohash).thenApply { announcesRaw ->
             if (null == announcesRaw) throw IllegalArgumentException("announces: infohash wasn't loaded")
@@ -208,7 +205,6 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         }
     }
 
-    @Suppress("UNCHECKED_CAST")
     private fun announceAux(infohash: String, event: TorrentEvent, announces: List<List<String>>, tier:Int, trackerIdx:Int,
                             uploaded: Long, downloaded: Long, left: Long ): CompletableFuture<Int> {
         if (tier >= announces.size)
@@ -293,7 +289,6 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      *
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
-    @Suppress("UNCHECKED_CAST")
     fun invalidatePeer(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
         return announcesStorage.read(infohash).thenApply { value ->
             if (null == value) throw IllegalArgumentException("invalidePeer: infohash wasn't loaded")
@@ -327,7 +322,6 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws IllegalArgumentException If [infohash] is not loaded.
      * @return Sorted list of known peers.
      */
-    @Suppress("UNCHECKED_CAST")
     fun knownPeers(infohash: String): CompletableFuture<List<KnownPeer>> {
         return announcesStorage.read(infohash).thenCompose { value ->
             if (null == value) throw IllegalArgumentException("announces: infohash wasn't loaded")
@@ -414,6 +408,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                 throw java.lang.IllegalStateException("start: client is already listening on the specified port")
             }
             serverSocket = ServerSocket(port.toInt()) // Socket server to allow peers to connect to courseTorrent
+            //serverSocket!!.soTimeout = ? // TODO set timeout so as to not get stuck while accept()ing
         }
     }
 
@@ -463,6 +458,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws PeerConnectException if the connection to [peer] failed (timeout, connection closed after handshake, etc.)
      */
     fun connect(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
+        lateinit var socket: Socket
         return knownPeers(infohash).thenCompose { peersList ->
             if (!peersList.contains(peer)) {
                 throw IllegalArgumentException("connect: peer is not known")
@@ -472,41 +468,43 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
             if (null == value) {
                 throw IllegalArgumentException("connect: infohash is not loaded")
             }
-            lateinit var socket: Socket
-            try {
-                socket = Socket(peer.ip, peer.port)
-                val socketOutputStream = socket.getOutputStream()
-                //TODO: infohash to byte array or infohash hex2bytearray and peerId also ?
-                socketOutputStream.write(WireProtocolEncoder.handshake(infohash.toByteArray(), peerId.toByteArray()))
-                val response = socket.getInputStream().readAllBytes()
-                if (WireProtocolDecoder.handshake(response).infohash.contentEquals(infohash.toByteArray())) {
-                    //TODO: how to get bitmap out of message \ create message with bit map
-                    val map = activeSockets[infohash] ?: hashMapOf()
-                    map[peer] = socket
-                    activeSockets[infohash] = map
-                    piecesStorage.read(infohash).thenApply { pieceMap ->
-                        val bitfield = ByteArray(0)
-                        (pieceMap as HashMap<Int, Piece>).forEach{ index, piece ->
-                            //TODO: might be reveresed due to big\little endian (Abir)
-                            bitfield.plus(if (null == piece.data) 0.toByte() else 1.toByte())
-                        }
-                        bitfield
+            // Open a socket and send a handshake message
+            socket = Socket(peer.ip, peer.port)
+            val socketOutputStream = socket.getOutputStream()
+            //TODO: infohash to byte array or infohash hex2bytearray and peerId also ?
+            socketOutputStream.write(WireProtocolEncoder.handshake(infohash.toByteArray(), peerId.toByteArray()))
+
+            // Verify handshake response
+            val response = socket.getInputStream().readAllBytes()
+            if (WireProtocolDecoder.handshake(response).infohash.contentEquals(infohash.toByteArray())) {
+                //TODO: how to get bitmap out of message \ create message with bit map
+                val map = activeSockets[infohash] ?: hashMapOf()
+                map[peer] = socket
+                activeSockets[infohash] = map
+
+                // Init bitfield
+                piecesStorage.read(infohash).thenApply { pieceMap ->
+                    val bitfield = ByteArray(0)
+                    (pieceMap as HashMap<Int, Piece>).forEach { index, piece ->
+                        //TODO: might be reveresed due to big\little endian (Abir)
+                        bitfield.plus(if (null == piece.data) 0.toByte() else 1.toByte())
                     }
-                    //TODO now we want to send the bitfield (Abir)
-                    CompletableFuture.completedFuture(Unit)
-                } else {
-                    //TODO close connection here if response wasnt a handshake? or wasnt correct handshake? (Abir)
-                    CompletableFuture.completedFuture(Unit)
+                    bitfield
                 }
-            } catch (e: Exception) {
-                // TODO is this necessery? since socket will never be closed here? maybe we can just close (what does connection closed after handshake means) (Abir)
-                if(!socket.isClosed){
-                    socket.close()
-                }
-                throw PeerConnectException("connect: connection to peer failed")
+                //TODO now we want to send the bitfield (Abir)
+                CompletableFuture.completedFuture(Unit)
+            } else {
+                //TODO close connection here if response wasnt a handshake? or wasnt correct handshake? (Abir)
+                CompletableFuture.completedFuture(Unit)
             }
             //TODO something wrong with this setup because of the try, the composing here is not correct, now it "returns" from 3 diffrent spots, if we add next line returns only from here (Abir)
             //CompletableFuture.completedFuture(Unit)
+        }.exceptionally {
+            // TODO is this necessery? since socket will never be closed here? maybe we can just close (what does connection closed after handshake means) (Abir)
+            if (!socket.isClosed) {
+                socket.close()
+            }
+            throw PeerConnectException("connect: connection to peer failed")
         }
     }
 
