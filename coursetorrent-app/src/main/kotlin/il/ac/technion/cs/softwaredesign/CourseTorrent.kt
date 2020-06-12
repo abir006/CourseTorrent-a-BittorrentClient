@@ -113,12 +113,27 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      *
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
-    // TODO should remove entries from Statistics/Peers?
+    // TODO added delete from more storages, might want to add more depending on how many we will have (Abir)
     fun unload(infohash: String): CompletableFuture<Unit> {
-        return announcesStorage.read(infohash).thenCompose { value ->
-            if (null == value) {
+        return announcesStorage.read(infohash).thenCompose { announces  ->
+            if (null == announces) {
                 throw java.lang.IllegalArgumentException("unload: infohash wasn't loaded")
             }
+            var future = CompletableFuture.completedFuture(Unit)
+            for(trackerTier in announces  as List<List<String>>){
+                for(tracker in trackerTier){
+                   future = future.thenCompose {
+                       trackerStatisticsStorage.delete(infohash + "_" + tracker) }
+                }
+            }
+            future
+        }.thenCompose {
+            peersStorage.delete(infohash)
+        }.thenCompose {
+            piecesStorage.delete(infohash)
+        }.thenCompose {
+           torrentFilesStorage.delete(infohash)
+        }.thenCompose {
             announcesStorage.delete(infohash)
         }
     }
@@ -185,8 +200,9 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         return announces(infohash).thenCompose { announces ->
             if (event == TorrentEvent.STARTED) {
                 announcesStorage.shuffleTrackers(infohash, announces).thenApply { announces }
+            } else { //TODO: added else so shuffletracker will allways happen because thenApply is not enough if no 1 uses this certain announces(doesnt ^thenCompose if remove else) (Abir)
+                CompletableFuture.completedFuture(announces)
             }
-            CompletableFuture.completedFuture(announces)
         }.thenCompose { announces ->
             announceAux(infohash,event,announces,0,0,uploaded,downloaded,left)
         }
@@ -456,8 +472,9 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
             if (null == value) {
                 throw IllegalArgumentException("connect: infohash is not loaded")
             }
+            lateinit var socket: Socket
             try {
-                val socket = Socket(peer.ip, peer.port)
+                socket = Socket(peer.ip, peer.port)
                 val socketOutputStream = socket.getOutputStream()
                 //TODO: infohash to byte array or infohash hex2bytearray and peerId also ?
                 socketOutputStream.write(WireProtocolEncoder.handshake(infohash.toByteArray(), peerId.toByteArray()))
@@ -467,12 +484,29 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                     val map = activeSockets[infohash] ?: hashMapOf()
                     map[peer] = socket
                     activeSockets[infohash] = map
+                    piecesStorage.read(infohash).thenApply { pieceMap ->
+                        val bitfield = ByteArray(0)
+                        (pieceMap as HashMap<Int, Piece>).forEach{ index, piece ->
+                            //TODO: might be reveresed due to big\little endian (Abir)
+                            bitfield.plus(if (null == piece.data) 0.toByte() else 1.toByte())
+                        }
+                        bitfield
+                    }
+                    //TODO now we want to send the bitfield (Abir)
+                    CompletableFuture.completedFuture(Unit)
+                } else {
+                    //TODO close connection here if response wasnt a handshake? or wasnt correct handshake? (Abir)
+                    CompletableFuture.completedFuture(Unit)
                 }
             } catch (e: Exception) {
-                // TODO close socket?
+                // TODO is this necessery? since socket will never be closed here? maybe we can just close (what does connection closed after handshake means) (Abir)
+                if(!socket.isClosed){
+                    socket.close()
+                }
                 throw PeerConnectException("connect: connection to peer failed")
             }
-            CompletableFuture.completedFuture(Unit)
+            //TODO something wrong with this setup because of the try, the composing here is not correct, now it "returns" from 3 diffrent spots, if we add next line returns only from here (Abir)
+            //CompletableFuture.completedFuture(Unit)
         }
     }
 
