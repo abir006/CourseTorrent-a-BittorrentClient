@@ -9,6 +9,7 @@ import com.natpryce.hamkrest.isA
 import dev.misfitlabs.kotlinguice4.getInstance
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
 import io.mockk.*
+import org.checkerframework.common.value.qual.StaticallyExecutable
 import org.junit.jupiter.api.*
 import org.junit.jupiter.api.Assertions.*
 import java.util.concurrent.ExecutionException
@@ -29,7 +30,19 @@ class CourseTorrentTest {
         (courseTorrent.peersStorage.database.get() as DBSimulator).clear()
         (courseTorrent.trackerStatisticsStorage.database.get() as DBSimulator).clear()
         (courseTorrent.torrentStatisticsStorage.database.get() as DBSimulator).clear()
+        (courseTorrent.torrentFilesStorage.database.get() as DBSimulator).clear()
+        (courseTorrent.piecesStorage.database.get() as DBSimulator).clear()
     }
+
+   /* @AfterEach
+    fun `reset dbs`() {
+        (courseTorrent.announcesStorage.database.get() as DBSimulator).clear()
+        (courseTorrent.peersStorage.database.get() as DBSimulator).clear()
+        (courseTorrent.trackerStatisticsStorage.database.get() as DBSimulator).clear()
+        (courseTorrent.torrentStatisticsStorage.database.get() as DBSimulator).clear()
+        (courseTorrent.torrentFilesStorage.database.get() as DBSimulator).clear()
+        (courseTorrent.piecesStorage.database.get() as DBSimulator).clear()
+    }*/
 
     @Nested
     inner class `homework 0 tests` {
@@ -412,7 +425,6 @@ class CourseTorrentTest {
     companion object {
         val debian = this::class.java.getResource("/debian-10.3.0-amd64-netinst.iso.torrent").readBytes()
         val debianInfoHash = "5a8062c076fa85e8056451c0d9aa04349ae27909"
-
         val debianAnnouncesBytes = "41:http://bttracker.debian.org:6969/announce"
         val debianAnnounces = listOf(listOf("http://bttracker.debian.org:6969/announce"))
 

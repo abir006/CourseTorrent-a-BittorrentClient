@@ -40,4 +40,9 @@ class CourseTorrentTestModule : KotlinModule() {
     fun providesTorrentFiles(): Storage {
         return Storage(CompletableFuture.completedFuture(DBSimulator("TorrentFilesStorage-Test")))
     }
+
+    @Provides @Inject @PiecesSecureStorage
+    fun providesPieces(): Storage {
+        return Storage(CompletableFuture.completedFuture(DBSimulator("PiecesStorage-Test")))
+    }
 }

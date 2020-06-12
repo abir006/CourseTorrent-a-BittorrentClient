@@ -10,14 +10,13 @@ import java.net.InetAddress
 /**
  * Extracts the infohash and announcements out of the torrent metainfo.
  */
-fun parseTorrent(torrent: ByteArray): Pair<String, ByteArray> {
+fun parseTorrent(torrent: ByteArray): Pair<String, HashMap<*, *>> {
     val bencoder = Bencoder(torrent)
     val metaInfo = bencoder.decodeTorrent() as HashMap<*, *>
     val infoRawBytes = metaInfo["info"] as ByteArray
     val md = MessageDigest.getInstance("SHA-1")
     val infoHash = byteArray2Hex(md.digest(infoRawBytes))
-    val announcements = (metaInfo["announce-list"] ?: metaInfo["announce"]) as ByteArray
-    return Pair(infoHash, announcements)
+    return Pair(infoHash, metaInfo)
 }
 
 /**

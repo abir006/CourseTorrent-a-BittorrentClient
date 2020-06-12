@@ -21,6 +21,31 @@ data class KnownPeer(
     val peerId: String?
 )
 
+data class ConnectedPeer(
+    val knownPeer: KnownPeer,
+    val amChoking: Boolean = false,
+    val amInterested: Boolean = false,
+    val peerChoking: Boolean = false,
+    val peerInterested: Boolean = false,
+    val completedPercentage: Double = 0.0,
+    val averageSpeed: Double = 0.0
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as ConnectedPeer
+
+        if (knownPeer != other.knownPeer) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        return knownPeer.hashCode()
+    }
+}
+
 data class TorrentStats(
     val uploaded: Long, /* Total number of bytes downloaded (can be more than the size of the torrent) */
     val downloaded: Long, /* Total number of bytes uploaded (can be more than the size of the torrent) */
@@ -34,3 +59,18 @@ data class TorrentStats(
     val leechTime: Duration, /* Amount of time this torrent was loaded, incomplete, and the client was started */
     val seedTime: Duration /* Amount of time this torrent was loaded, complete, and the client was started */
 )
+
+data class Piece(
+    val index: Long,
+    val length: Long,
+    val hashValue: ByteArray,
+    val data: ByteArray?
+)
+
+data class TorrentFile(
+    val name: String,
+    val index: Long,
+    val offset: Long,
+    val length: Long
+)
+

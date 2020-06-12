@@ -27,4 +27,7 @@ annotation class TorrentStatisticsSecureStorage
 @BindingAnnotation
 annotation class TorrentFilesSecureStorage
 
-
+@Target(AnnotationTarget.VALUE_PARAMETER, AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+@BindingAnnotation
+annotation class PiecesSecureStorage

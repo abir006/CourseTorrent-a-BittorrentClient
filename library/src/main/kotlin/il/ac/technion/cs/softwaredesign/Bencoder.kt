@@ -1,7 +1,9 @@
 package il.ac.technion.cs.softwaredesign
 
-import java.lang.IllegalArgumentException
+import java.io.*
+import java.security.MessageDigest
 import java.time.Duration
+
 
 //TODO: maybe we want to add details of the returned dicts? from https://wiki.theory.org/index.php/BitTorrentSpecification
 
@@ -54,15 +56,26 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
                 when {
                     obj as String == "pieces" -> {
                         val length = readUntil(':').toInt()
-                        //put(obj as String, arr.drop(i).take(length).toByteArray())
+                        put(obj as String, arr.drop(i).take(length).toByteArray())
                         i += length
                         obj = decodeTorrent()
                     }
-                    else -> {
+                    obj as String == "info" -> {
                         keyStart.add(i)
                         decodeTorrent()
                         keyLength.add(i - keyStart.last())
                         put(obj as String, arr.drop(keyStart.last()).take(keyLength.last()).toByteArray())
+                        //put(obj as String, decodeTorrent())
+                        keyLength.removeAt(keyLength.size - 1)
+                        keyStart.removeAt(keyStart.size - 1)
+                        obj = decodeTorrent()
+                    }
+                    else -> {
+                        keyStart.add(i)
+                        //decodeTorrent()
+                        keyLength.add(i - keyStart.last())
+                        //put(obj as String, arr.drop(keyStart.last()).take(keyLength.last()).toByteArray())
+                        put(obj as String, decodeTorrent())
                         keyLength.removeAt(keyLength.size - 1)
                         keyStart.removeAt(keyStart.size - 1)
                         obj = decodeTorrent()
@@ -122,12 +135,25 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
      * Returns an instance of the encoded data class.
      */
     fun decodeData(): Any? = when (read(1)[0]) {
-        'i' -> (readUntil('e')).toInt()
+        'i' -> (readUntil('e')).toLong()
         'l' -> ArrayList<Any?>().apply {
             var obj = this@Bencoder.decodeData()
             while (obj != Unit) {
                 add(obj)
                 obj = this@Bencoder.decodeData()
+            }
+        }
+        'd' -> HashMap<Any, Any?>().apply {
+
+            var obj = decodeData()
+            while (obj != Unit) {
+                if(obj is String) {
+                    put(obj as String, decodeData())
+                }
+                if(obj is Long){
+                    put(obj as Long, decodeData())
+                }
+                obj = decodeData()
             }
         }
         's' -> {
@@ -139,9 +165,9 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
                 }
             }
             Scrape(
-                tmpMap["complete"] as Int,
-                tmpMap["downloaded"] as Int,
-                tmpMap["incomplete"] as Int,
+                (tmpMap["complete"] as Long).toInt(),
+                (tmpMap["downloaded"] as Long).toInt(),
+                (tmpMap["incomplete"] as Long).toInt(),
                 tmpMap["name"] as String?)
         }
         'f' -> {
@@ -164,7 +190,7 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
             }
             KnownPeer(
                 tmpMap["ip"] as String,
-                tmpMap["port"] as Int,
+                (tmpMap["port"] as Long).toInt(),
                 tmpMap["peerId"] as String?)
         }
         't' -> {
@@ -187,6 +213,37 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
                 tmpMap["seedTime"] as Duration
             )
         }
+        'h' -> {
+            val tmpMap = HashMap<String, Any?>().apply {
+                var obj = this@Bencoder.decodeData()
+                while (obj != Unit) {
+                    put(obj as String, this@Bencoder.decodeData())
+                    obj = this@Bencoder.decodeData()
+                }
+            }
+            TorrentFile(
+                tmpMap["name"] as String,
+                tmpMap["index"] as Long,
+                tmpMap["offset"] as Long,
+                tmpMap["length"] as Long
+            )
+        }
+        'p' -> {
+            val tmpMap = HashMap<String, Any?>().apply {
+                var obj = this@Bencoder.decodeData()
+                while (obj != Unit) {
+                    put(obj as String, this@Bencoder.decodeData())
+                    obj = this@Bencoder.decodeData()
+                }
+            }
+            val data = if (tmpMap["data"] != null) (tmpMap["data"] as String).toByteArray() else null
+            Piece(
+                tmpMap["index"] as Long,
+                tmpMap["length"] as Long,
+                decodeHexString(tmpMap["hashValue"] as String) ?: ByteArray(0),
+                data
+            )
+        }
         'n' -> null
         'e' -> Unit
         in ('0'..'9') -> read((arr[i - 1].toChar() + readUntil(':')).toInt())
@@ -200,6 +257,7 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
          */
         fun encodeStr(obj: Any?): String = when (obj) {
             is Int -> "i${obj}e"
+            is Long -> "i${obj}e"
             is String -> "${obj.length}:$obj"
             is List<*> -> "l${obj.joinToString("") { encodeStr(it!!) }}e"
             is HashMap<*, *> -> "d${obj.map { encodeStr(it.key!!) + encodeStr(it.value!!) }.joinToString("")}e"
@@ -236,6 +294,23 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
                 tmpMap["seedTime"] = obj.seedTime
                 "t${tmpMap.map { encodeStr(it.key!!) + encodeStr(it.value!!) }.joinToString("")}e"
             }
+            is TorrentFile -> {
+                val tmpMap = HashMap<String, Any>()
+                tmpMap["name"] = obj.name
+                tmpMap["index"] = obj.index
+                tmpMap["offset"] = obj.offset
+                tmpMap["length"] = obj.length
+                "h${tmpMap.map { encodeStr(it.key!!) + encodeStr(it.value!!) }.joinToString("")}e"
+            }
+            is Piece -> {
+                val tmpMap = HashMap<String, Any?>()
+                tmpMap["index"] = obj.index
+                tmpMap["length"] = obj.length
+                tmpMap["hashValue"] = byteArray2Hex((obj.hashValue))
+                tmpMap["data"] = obj.data?.toString() // TODO works?
+
+                "p${tmpMap.map { encodeStr(it.key!!) + encodeStr(it.value) }.joinToString("")}e"
+            }
             else -> {
                 if (obj == null) {
                     "n"
@@ -243,6 +318,32 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
                     throw IllegalArgumentException()
                 }
             }
+        }
+
+        // TODO where do you wanna be?
+        fun hexToByte(hexString: String): Byte {
+            val firstDigit = toDigit(hexString[0])
+            val secondDigit = toDigit(hexString[1])
+            return ((firstDigit shl 4) + secondDigit).toByte()
+        }
+
+        private fun toDigit(hexChar: Char): Int {
+            val digit = Character.digit(hexChar, 16)
+            require(digit != -1) { "Invalid Hexadecimal Character: $hexChar" }
+            return digit
+        }
+
+        fun decodeHexString(hexString: String): ByteArray? {
+            require(hexString.length % 2 != 1) { "Invalid hexadecimal String supplied." }
+            val bytes = ByteArray(hexString.length / 2)
+            run {
+                var i = 0
+                while (i < hexString.length) {
+                    bytes[i / 2] = hexToByte(hexString.substring(i, i + 2))
+                    i += 2
+                }
+            }
+            return bytes
         }
     }
 }
