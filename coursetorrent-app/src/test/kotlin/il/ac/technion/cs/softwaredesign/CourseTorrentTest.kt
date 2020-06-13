@@ -7,8 +7,10 @@ import com.natpryce.hamkrest.equalTo
 import com.natpryce.hamkrest.hasSize
 import com.natpryce.hamkrest.isA
 import dev.misfitlabs.kotlinguice4.getInstance
+import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
 import io.mockk.*
+import net.bytebuddy.build.Plugin
 import org.checkerframework.common.value.qual.StaticallyExecutable
 import org.junit.jupiter.api.*
 import org.junit.jupiter.api.Assertions.*
@@ -437,10 +439,10 @@ class CourseTorrentTest {
     inner class `homework 2 tests` {
 
         @Nested
-        inner class `testing connect functionality`{
+        inner class `testing connect functionality` {
 
             @Test
-            fun `connect succsesful to remote client from client side`() {
+            fun `connect successful to remote client from client side`() {
                 courseTorrent.load(debian).get()
                 courseTorrent.start().get()
 
@@ -448,31 +450,82 @@ class CourseTorrentTest {
                 server.soTimeout = 100
 
                 val testPeer = KnownPeer("127.0.0.1", 6883, "testPeer")
-                courseTorrent.peersStorage.addPeers(debianInfoHash, listOf(hashMapOf(
-                                "ip" to "127.0.0.1", "port" to 6883, "peer id" to "testPeer"))).get()
+                courseTorrent.peersStorage.addPeers(
+                    debianInfoHash, listOf(
+                        hashMapOf(
+                            "ip" to "127.0.0.1", "port" to 6883, "peer id" to "testPeer"
+                        )
+                    )
+                ).get()
 
-                CompletableFuture.completedFuture(Unit).thenRunAsync {
+                val remoteSocket = CompletableFuture.supplyAsync {
                     try {
                         val socket = server.accept()
-                        socket.getOutputStream().write(WireProtocolEncoder.handshake(
-                                            Bencoder.decodeHexString(debianInfoHash)!!,
-                                            Bencoder.decodeHexString(debianInfoHash.reversed())!!))
-                        val output = socket.inputStream.readNBytes(68)
-                        val (otherInfohash, otherPeerId) = StaffWireProtocolDecoder.handshake(output)
-
-                        assertTrue(otherInfohash.contentEquals(Bencoder.decodeHexString(debianInfoHash)!!))
-
+                        socket.getOutputStream().write(
+                            WireProtocolEncoder.handshake(
+                                Bencoder.decodeHexString(debianInfoHash)!!,
+                                Bencoder.decodeHexString(debianInfoHash.reversed())!!
+                            )
+                        )
                         server.close()
-                    }
-                    catch(e: Exception){
-                        print("remote server failed to accept.")
+                        socket
+                    } catch (e: Exception) {
+                        throw PeerConnectException("remote server accept failed")
                     }
                 }
                 courseTorrent.connect(debianInfoHash, testPeer).get()
+
+                val output = remoteSocket.get().inputStream.readNBytes(68)
+                val (otherInfohash, otherPeerId) = StaffWireProtocolDecoder.handshake(output)
+
+                assertTrue(otherInfohash.contentEquals(Bencoder.decodeHexString(debianInfoHash)!!))
+                assertEquals(
+                    courseTorrent.connectedPeers(debianInfoHash).get(),
+                    listOf(ConnectedPeer(testPeer, false, true))
+                )
+                courseTorrent.stop()
+            }
+
+            @Test
+            fun `connect to a remote client updates connectedPeers`() {
+                courseTorrent.load(debian).get()
+                courseTorrent.start().get()
+
+                val server = ServerSocket(6883)
+                server.soTimeout = 100
+
+                val testPeer = KnownPeer("127.0.0.1", 6883, "testPeer")
+                courseTorrent.peersStorage.addPeers(
+                    debianInfoHash, listOf(
+                        hashMapOf(
+                            "ip" to "127.0.0.1", "port" to 6883, "peer id" to "testPeer"
+                        )
+                    )
+                ).get()
+
+                CompletableFuture.runAsync {
+                    try {
+                        val socket = server.accept()
+                        socket.getOutputStream().write(
+                            WireProtocolEncoder.handshake(
+                                Bencoder.decodeHexString(debianInfoHash)!!,
+                                Bencoder.decodeHexString(debianInfoHash.reversed())!!
+                            )
+                        )
+                        server.close()
+                    } catch (e: Exception) {
+                        throw PeerConnectException("remote server accept failed")
+                    }
+                }
+                courseTorrent.connect(debianInfoHash, testPeer).get()
+
+                assertEquals(courseTorrent.connectedPeers(debianInfoHash).get(),
+                    listOf(ConnectedPeer(testPeer, false, true)))
                 courseTorrent.stop()
             }
         }
     }
+
 
     companion object {
         val debian = this::class.java.getResource("/debian-10.3.0-amd64-netinst.iso.torrent").readBytes()

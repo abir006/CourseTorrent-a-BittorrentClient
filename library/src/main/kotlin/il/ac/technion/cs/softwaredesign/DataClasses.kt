@@ -24,12 +24,12 @@ data class KnownPeer(
 
 data class ConnectedPeer(
     val knownPeer: KnownPeer,
-    val amChoking: Boolean = true,
-    val amInterested: Boolean = false,
-    val peerChoking: Boolean = true,
-    val peerInterested: Boolean = false,
-    val completedPercentage: Double = 0.0,
-    val averageSpeed: Double = 0.0
+    var amChoking: Boolean = true,
+    var amInterested: Boolean = false,
+    var peerChoking: Boolean = true,
+    var peerInterested: Boolean = false,
+    var completedPercentage: Double = 0.0,
+    var averageSpeed: Double = 0.0
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
