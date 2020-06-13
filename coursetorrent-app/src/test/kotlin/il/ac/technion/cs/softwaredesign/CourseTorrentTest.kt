@@ -1,3 +1,5 @@
+@file:Suppress("UNCHECKED_CAST")
+
 package il.ac.technion.cs.softwaredesign
 
 import com.google.inject.Guice
@@ -22,6 +24,9 @@ import java.lang.Thread.sleep
 import java.net.MalformedURLException
 import java.net.ServerSocket
 import java.net.Socket
+import java.sql.Time
+import java.time.Duration
+import java.time.LocalTime
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
@@ -483,7 +488,7 @@ class CourseTorrentTest {
                     courseTorrent.connectedPeers(debianInfoHash).get(),
                     listOf(ConnectedPeer(testPeer, false, true))
                 )
-                courseTorrent.stop()
+                courseTorrent.stop().get()
             }
 
             @Test
@@ -521,7 +526,57 @@ class CourseTorrentTest {
 
                 assertEquals(courseTorrent.connectedPeers(debianInfoHash).get(),
                     listOf(ConnectedPeer(testPeer, false, true)))
-                courseTorrent.stop()
+                courseTorrent.stop().get()
+            }
+        }
+
+        @Nested
+        inner class `testing requestPiece functionality` {
+
+            @Test
+            fun `checking requestPiece`() {
+                courseTorrent.load(debian).get()
+                courseTorrent.start().get()
+                val pieceMapByes = courseTorrent.piecesStorage.read(debianInfoHash).get()
+                val pieceMap = Bencoder(pieceMapByes as ByteArray).decodeData() as HashMap<Long, Piece>
+                val testPiece = pieceMap[0]
+
+                val server = ServerSocket(6883)
+                //server.soTimeout = 100
+
+                val testPeer = KnownPeer("127.0.0.1", 6883, "testPeer")
+                courseTorrent.peersStorage.addPeers(
+                    debianInfoHash, listOf(
+                        hashMapOf(
+                            "ip" to "127.0.0.1", "port" to 6883, "peer id" to "testPeer"
+                        )
+                    )
+                ).get()
+
+                CompletableFuture.runAsync {
+                    try {
+                        val socket = server.accept()
+                        socket.getOutputStream().write(
+                            WireProtocolEncoder.handshake(
+                                Bencoder.decodeHexString(debianInfoHash)!!,
+                                Bencoder.decodeHexString(debianInfoHash.reversed())!!
+                            )
+                        )
+                        sleep(1000)
+                        for(i in 0..16){
+                            socket.getOutputStream().write(
+                                WireProtocolEncoder.encode(7.toByte(),ByteArray(16384),0,i*16384)
+                            )
+                        }
+
+                    } catch (e: Exception) {
+                        throw PeerConnectException("remote server accept failed")
+                    }
+                }
+                courseTorrent.connect(debianInfoHash, testPeer).get()
+
+                val temp = courseTorrent.requestPiece(debianInfoHash,testPeer,0).get()
+                courseTorrent.stop().get()
             }
         }
     }
