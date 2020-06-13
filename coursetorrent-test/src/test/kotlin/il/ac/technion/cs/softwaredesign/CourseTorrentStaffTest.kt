@@ -243,11 +243,11 @@ class CourseTorrentStaffTest {
             )
         }.join()
 
-        val port: Int = TODO("Get port from announce")
+        val port: Int = 6882
 
         assertDoesNotThrow { torrent.start().join() }
 
-        val sock = assertDoesNotThrow { Socket("127.0.0.1", port) }
+        val sock = assertDoesNotThrow { Socket("10.100.102.5", port) }
         sock.outputStream.write(
             WireProtocolEncoder.handshake(
                 hexStringToByteArray(infohash),

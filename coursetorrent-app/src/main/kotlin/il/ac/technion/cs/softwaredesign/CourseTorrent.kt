@@ -713,7 +713,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                 }
                 socket!!.getOutputStream().write(
                     WireProtocolEncoder.encode(6.toByte(), pieceIndex.toInt(), i * (partLength), partLength))
-                val response = socket.getInputStream().readNBytes(9+partLength)
+                val response = socket.getInputStream().readNBytes(13+partLength)
                 //TODO check that this represents peer has diconnected
                 if(response[0] == (-1).toByte()){
                     activeSockets[infohash]!!.remove(peer)
@@ -725,7 +725,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                     activePeers[infohash]!![peer]!!.peerChoking = true
                     throw PeerChokedException("requestPiece: peer is choking")
                 }
-                WireProtocolDecoder.decode(response.drop(4).toByteArray(),3).contents.copyInto(requestedPiece.data!!,i * (partLength))
+                WireProtocolDecoder.decode(response,2).contents.copyInto(requestedPiece.data!!,i * (partLength))
             }
             val md = MessageDigest.getInstance("SHA-1")
             val pieceHash = md.digest(requestedPiece.data!!)
