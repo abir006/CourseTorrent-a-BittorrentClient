@@ -14,6 +14,14 @@ import org.junit.jupiter.api.*
 import org.junit.jupiter.api.Assertions.*
 import java.util.concurrent.ExecutionException
 import org.junit.jupiter.api.assertDoesNotThrow
+import java.io.IOError
+import java.lang.Exception
+import java.lang.Thread.sleep
+import java.net.MalformedURLException
+import java.net.ServerSocket
+import java.net.Socket
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 
 
 class CourseTorrentTest {
@@ -33,16 +41,6 @@ class CourseTorrentTest {
         (courseTorrent.torrentFilesStorage.database.get() as DBSimulator).clear()
         (courseTorrent.piecesStorage.database.get() as DBSimulator).clear()
     }
-
-   /* @AfterEach
-    fun `reset dbs`() {
-        (courseTorrent.announcesStorage.database.get() as DBSimulator).clear()
-        (courseTorrent.peersStorage.database.get() as DBSimulator).clear()
-        (courseTorrent.trackerStatisticsStorage.database.get() as DBSimulator).clear()
-        (courseTorrent.torrentStatisticsStorage.database.get() as DBSimulator).clear()
-        (courseTorrent.torrentFilesStorage.database.get() as DBSimulator).clear()
-        (courseTorrent.piecesStorage.database.get() as DBSimulator).clear()
-    }*/
 
     @Nested
     inner class `homework 0 tests` {
@@ -296,6 +294,19 @@ class CourseTorrentTest {
                 assert((courseTorrent.trackerStatisticsStorage.read(info + "_" + kiwiAnnounces[0][1]).get() as ByteArray)
                     .contentEquals(bencodedSimpleAnnounceScrape.toByteArray()))
             }
+
+            @Test
+            fun `announce adds failure when url fails`() {
+                val info = courseTorrent.load(kiwiBuntu).get()
+                every { courseTorrent.httpClient.getResponse() } throws MalformedURLException("url failed") andThen bencodedSimpleAnnounceResponse.toByteArray()
+
+                courseTorrent.announce(info, TorrentEvent.STOPPED, 10, 12, 14).get()
+
+                assert((courseTorrent.trackerStatisticsStorage.read(info + "_" + kiwiAnnounces[0][0]).get() as ByteArray)
+                    .contentEquals(bencodedURLFailureScrape.toByteArray()))
+                assert((courseTorrent.trackerStatisticsStorage.read(info + "_" + kiwiAnnounces[0][1]).get() as ByteArray)
+                    .contentEquals(bencodedSimpleAnnounceScrape.toByteArray()))
+            }
         }
 
 
@@ -422,6 +433,47 @@ class CourseTorrentTest {
         }
     }
 
+    @Nested
+    inner class `homework 2 tests` {
+
+        @Nested
+        inner class `testing connect functionality`{
+
+            @Test
+            fun `connect succsesful to remote client from client side`() {
+                courseTorrent.load(debian).get()
+                courseTorrent.start().get()
+
+                val server = ServerSocket(6883)
+                server.soTimeout = 100
+
+                val testPeer = KnownPeer("127.0.0.1", 6883, "testPeer")
+                courseTorrent.peersStorage.addPeers(debianInfoHash, listOf(hashMapOf(
+                                "ip" to "127.0.0.1", "port" to 6883, "peer id" to "testPeer"))).get()
+
+                CompletableFuture.completedFuture(Unit).thenRunAsync {
+                    try {
+                        val socket = server.accept()
+                        socket.getOutputStream().write(WireProtocolEncoder.handshake(
+                                            Bencoder.decodeHexString(debianInfoHash)!!,
+                                            Bencoder.decodeHexString(debianInfoHash.reversed())!!))
+                        val output = socket.inputStream.readNBytes(68)
+                        val (otherInfohash, otherPeerId) = StaffWireProtocolDecoder.handshake(output)
+
+                        assertTrue(otherInfohash.contentEquals(Bencoder.decodeHexString(debianInfoHash)!!))
+
+                        server.close()
+                    }
+                    catch(e: Exception){
+                        print("remote server failed to accept.")
+                    }
+                }
+                courseTorrent.connect(debianInfoHash, testPeer).get()
+                courseTorrent.stop()
+            }
+        }
+    }
+
     companion object {
         val debian = this::class.java.getResource("/debian-10.3.0-amd64-netinst.iso.torrent").readBytes()
         val debianInfoHash = "5a8062c076fa85e8056451c0d9aa04349ae27909"
@@ -490,6 +542,7 @@ class CourseTorrentTest {
         val bencodedSimpleAnnounceScrape = Bencoder.encodeStr(Scrape(1000,0,26,null))
         val bencodedFailureAnnounceResponse = Bencoder.encodeStr(hashMapOf("failure reason" to "we need to test it"))
         val bencodedFailureScrape = Bencoder.encodeStr(Failure("we need to test it"))
+        val bencodedURLFailureScrape = Bencoder.encodeStr(Failure("announce: URL connection failed"))
         val bencodedSimpleScrapeResponse = Bencoder.encodeStr(hashMapOf("files" to hashMapOf(
             "binaryinfohash" to hashMapOf(
                 "downloaded" to 100, "complete" to 200, "incomplete" to 50, "name" to "gal lalouche"))))
@@ -503,4 +556,18 @@ class CourseTorrentTest {
             hashMapOf("ip" to "104.30.244.2","port" to 51413,"peer id" to "3"),
             hashMapOf("ip" to "104.244.4.1","port" to 51413,"peer id" to "4"))))
     }
+
+    private fun initiateRemotePeerForConnect(infohash: String): Socket {
+        val port: Int = 6882
+
+        val sock = assertDoesNotThrow { Socket("10.100.102.5", port) }
+        sock.outputStream.write(
+            WireProtocolEncoder.handshake(
+                Bencoder.decodeHexString(infohash)!!,
+                Bencoder.decodeHexString(infohash.reversed())!!
+            )
+        )
+        return sock
+    }
 }
+

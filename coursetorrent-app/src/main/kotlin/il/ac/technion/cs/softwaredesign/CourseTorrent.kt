@@ -8,12 +8,13 @@ import java.security.MessageDigest
 import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
-import java.lang.Exception
+import java.lang.Thread.sleep
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.CompletableFuture
 import kotlin.math.ceil
 
+val URL_ERROR = -1
 /**
  * This is the class implementing CourseTorrent, a BitTorrent client.
  *
@@ -215,7 +216,6 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         val future = CompletableFuture.completedFuture(0).thenCompose {
             val url = Announces.createAnnounceURL(infohash, tracker, peerId, port, uploaded, downloaded, left, event)
             httpClient.setURL(url)
-            try {
                 val response = httpClient.getResponse()
                 val responseDict = (Bencoder(response).decodeResponse()) as HashMap<*, *>
                 if (responseDict.containsKey("failure reason")) {
@@ -230,18 +230,26 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                         CompletableFuture.completedFuture(Pair(true, responseDict.getOrDefault("interval", 0) as Int))
                     }
                 }
-            } catch(e: Exception) {
-                trackerStatisticsStorage.addFailure(infohash, tracker, "announce: URL connection failed").thenApply { Pair(false, 0) }
+        }.exceptionally { exc ->
+            if(exc.cause is java.lang.IllegalArgumentException){
+                throw exc
             }
-        }
+            Pair(false, URL_ERROR) }
         return future.thenCompose { (isDone: Boolean, interval: Int) ->
             if (isDone) {
                 CompletableFuture.completedFuture(interval)
             } else {
-                announceAux(infohash, event, announces, tier, trackerIdx+1, uploaded, downloaded, left)
+                if (interval == URL_ERROR) {
+                    trackerStatisticsStorage.addFailure(infohash, tracker, "announce: URL connection failed").thenCompose {
+                        announceAux(infohash, event, announces, tier, trackerIdx + 1, uploaded, downloaded, left)
+                    }
+                } else {
+                    announceAux(infohash, event, announces, tier, trackerIdx + 1, uploaded, downloaded, left)
+                }
             }
         }
     }
+
 
     /**
      * Scrape all trackers identified by a torrent, and store the statistics provided. The specification for the scrape
@@ -263,17 +271,15 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                     if (supportsScraping) {
                         val url = TrackerStatistics.createScrapeURL(infohash, tracker)
                         httpClient.setURL(url)
-                        try {
-                            val response = (Bencoder(httpClient.getResponse()).decodeResponse()) as HashMap<*, *>
-                            val responseDict = (response["files"] as HashMap<*, *>).values.first() as HashMap<*, *>
-                            trackerStatisticsStorage.addScrape(responseDict, infohash, tracker)
-                        } catch (e: Exception) {
-                            trackerStatisticsStorage.addFailure(infohash, tracker, "scrape: URL connection failed")
-                        }
+                        val response = (Bencoder(httpClient.getResponse()).decodeResponse()) as HashMap<*, *>
+                        val responseDict = (response["files"] as HashMap<*, *>).values.first() as HashMap<*, *>
+                        trackerStatisticsStorage.addScrape(responseDict, infohash, tracker)
                     } else {
                         // Tracker doesn't support scraping
                         trackerStatisticsStorage.addFailure(infohash, tracker, "scrape: URL connection failed")
                     }
+                }.exceptionally {
+                    trackerStatisticsStorage.addFailure(infohash, tracker, "scrape: URL connection failed")
                 }
             }
             future
@@ -408,7 +414,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                 throw java.lang.IllegalStateException("start: client is already listening on the specified port")
             }
             serverSocket = ServerSocket(port.toInt()) // Socket server to allow peers to connect to courseTorrent
-            //serverSocket!!.soTimeout = ? // TODO set timeout so as to not get stuck while accept()ing
+            //serverSocket!!.soTimeout = 100 // TODO set timeout so as to not get stuck while accept()ing
         }
     }
 
@@ -472,34 +478,40 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
             socket = Socket(peer.ip, peer.port)
             val socketOutputStream = socket.getOutputStream()
             //TODO: infohash to byte array or infohash hex2bytearray and peerId also ?
-            socketOutputStream.write(WireProtocolEncoder.handshake(infohash.toByteArray(), peerId.toByteArray()))
-
+            socketOutputStream.write(WireProtocolEncoder.handshake(Bencoder.decodeHexString(infohash)!!, peerId.toByteArray()))
             // Verify handshake response
-            val response = socket.getInputStream().readAllBytes()
-            if (WireProtocolDecoder.handshake(response).infohash.contentEquals(infohash.toByteArray())) {
+            val response = socket.getInputStream().readNBytes(68)
+            if (WireProtocolDecoder.handshake(response).infohash.contentEquals(Bencoder.decodeHexString(infohash)!!)) {
                 //TODO: how to get bitmap out of message \ create message with bit map
                 val map = activeSockets[infohash] ?: hashMapOf()
                 map[peer] = socket
                 activeSockets[infohash] = map
-
+                activePeers.add(ConnectedPeer(peer))
                 // Init bitfield
-                piecesStorage.read(infohash).thenApply { pieceMap ->
-                    val bitfield = ByteArray(0)
-                    (pieceMap as HashMap<Int, Piece>).forEach { index, piece ->
-                        //TODO: might be reveresed due to big\little endian (Abir)
-                        bitfield.plus(if (null == piece.data) 0.toByte() else 1.toByte())
+                piecesStorage.read(infohash).thenApply { pieceMapBytes ->
+                    val pieceMap = Bencoder(pieceMapBytes as ByteArray).decodeData() as HashMap<Long, Piece>
+                    val bitField = ByteArray(pieceMap.size)
+                    pieceMap.forEach{ index, piece ->
+                        bitField[index.toInt()] = if (null == piece.data) 0.toByte() else 1.toByte()
                     }
-                    bitfield
-                }
-                //TODO now we want to send the bitfield (Abir)
-                CompletableFuture.completedFuture(Unit)
+                    if(bitField.contains(1.toByte())){
+                        socketOutputStream.write(WireProtocolEncoder.encode(5.toByte(),bitField,0))
+                    }
+                    //TODO maybe we dont want sleep or handleSmallMessages
+                }.thenCompose {
+                    sleep(100)
+                    handleSmallMessages() } //handling bitfields and have request after 100ms
             } else {
-                //TODO close connection here if response wasnt a handshake? or wasnt correct handshake? (Abir)
+                val map = activeSockets[infohash] ?: hashMapOf()
+                map[peer] = null
+                activeSockets[infohash] = map
+                socket.close()
                 CompletableFuture.completedFuture(Unit)
             }
-            //TODO something wrong with this setup because of the try, the composing here is not correct, now it "returns" from 3 diffrent spots, if we add next line returns only from here (Abir)
-            //CompletableFuture.completedFuture(Unit)
-        }.exceptionally {
+        }.exceptionally { exc ->
+            if(exc.cause is java.lang.IllegalArgumentException){
+                throw exc
+            }
             // TODO is this necessery? since socket will never be closed here? maybe we can just close (what does connection closed after handshake means) (Abir)
             if (!socket.isClosed) {
                 socket.close()

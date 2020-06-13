@@ -1,5 +1,6 @@
 package il.ac.technion.cs.softwaredesign
 
+import java.sql.Time
 import java.time.Duration
 
 sealed class ScrapeData
@@ -23,9 +24,9 @@ data class KnownPeer(
 
 data class ConnectedPeer(
     val knownPeer: KnownPeer,
-    val amChoking: Boolean = false,
+    val amChoking: Boolean = true,
     val amInterested: Boolean = false,
-    val peerChoking: Boolean = false,
+    val peerChoking: Boolean = true,
     val peerInterested: Boolean = false,
     val completedPercentage: Double = 0.0,
     val averageSpeed: Double = 0.0
