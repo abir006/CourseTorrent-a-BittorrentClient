@@ -725,7 +725,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                     activePeers[infohash]!![peer]!!.peerChoking = true
                     throw PeerChokedException("requestPiece: peer is choking")
                 }
-                WireProtocolDecoder.decode(response,3).contents.copyInto(requestedPiece.data!!,i * (partLength))
+                WireProtocolDecoder.decode(response.drop(4).toByteArray(),3).contents.copyInto(requestedPiece.data!!,i * (partLength))
             }
             val md = MessageDigest.getInstance("SHA-1")
             val pieceHash = md.digest(requestedPiece.data!!)
