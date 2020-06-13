@@ -36,6 +36,8 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         private val randomGenerated = (1..6).map{(('A'..'Z')+('a'..'z')+('0'..'9')).random()}.joinToString("")
     }
 
+    //TODO remove announcesStorage.read(infohash) calls for verifying a loaded infohash, replace with TorrentStats.read
+
     private val peerId = "-CS1000-$studentId$randomGenerated"
     private val port = "6882" // TODO change? randomize?
     private var serverSocket: ServerSocket? = null
@@ -198,7 +200,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         return announces(infohash).thenCompose { announces ->
             if (event == TorrentEvent.STARTED) {
                 announcesStorage.shuffleTrackers(infohash, announces).thenApply { announces }
-            } else { //TODO: added else so shuffletracker will allways happen because thenApply is not enough if no 1 uses this certain announces(doesnt ^thenCompose if remove else) (Abir)
+            } else {
                 CompletableFuture.completedFuture(announces)
             }
         }.thenCompose { announces ->
@@ -556,7 +558,17 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      *
      * @throws IllegalArgumentException if [infohash] is not loaded.
      */
-    fun connectedPeers(infohash: String): CompletableFuture<List<ConnectedPeer>> = TODO("Implement me!")
+    fun connectedPeers(infohash: String): CompletableFuture<List<ConnectedPeer>> {
+        return announcesStorage.read(infohash).thenApply {
+            // activePeers holds the up-to-date values of ConnectedPeer properties. Therefore, the set is filtered by
+            // activeSockets, which maps infohash to related KnownPeers.
+            activePeers.filter { connectedPeer ->
+                activeSockets[infohash]?.containsKey(connectedPeer.knownPeer) ?: false
+            }
+        }.exceptionally {
+            throw IllegalArgumentException("connectedPeers: infohash isn't loaded")
+        }
+    }
 
     /**
      * Send a choke message to [peer], which is currently connected. Future calls to [connectedPeers] should show that
