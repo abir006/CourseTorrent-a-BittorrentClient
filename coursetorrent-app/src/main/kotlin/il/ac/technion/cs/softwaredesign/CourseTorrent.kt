@@ -928,17 +928,21 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
             CompletableFuture<Map<KnownPeer, List<Long>>> {
         return piecesStorage.read(infohash).thenApply { piecesMapBytes ->
             if (null == piecesMapBytes) {
-                throw IllegalArgumentException("availablePieces infohash not loaded")
+                throw IllegalArgumentException("availablePieces: infohash not loaded")
             }
             val setNeededPieces = hashSetOf<Long>()
             val availablePiecesMap = hashMapOf<KnownPeer, List<Long>>()
             val piecesMap = Bencoder(piecesMapBytes).decodeData() as HashMap<Long, Piece>
+
+            // Leave only the pieces we don't have yet.
             piecesMap.forEach { entry ->
                 if (null == entry.value.data) {
                     setNeededPieces.add(entry.key)
                 }
             }
             val connectedPeers = activePeers[infohash]?.values ?: listOf<ConnectedPeer>()
+
+            // Leave only the pieces the peer has with index larger than startIndex
             for (peer in connectedPeers.filter { peer -> !peer.peerChoking }) {
                 val peerPieces = arrayListOf<Long>()
                 for (i in setNeededPieces.filter { x -> x >= startIndex }.sorted()) {
@@ -946,12 +950,13 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                         peerPieces.add(i)
                     }
                 }
+                // Leave only the pieces the peer has with index smaller than startIndex
                 for (i in setNeededPieces.filter { x -> x < startIndex }.sorted()) {
                     if (peersBitMap[infohash]?.get(peer.knownPeer)?.get(i) == 1.toByte()) {
                         peerPieces.add(i)
                     }
                 }
-                availablePiecesMap[peer.knownPeer] = peerPieces
+                availablePiecesMap[peer.knownPeer] = peerPieces.take(perPeer.toInt())
             }
             availablePiecesMap
         }
