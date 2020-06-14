@@ -8,9 +8,11 @@ import java.security.MessageDigest
 import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
+import java.lang.Exception
 import java.lang.Thread.sleep
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.time.*
 import java.util.*
 import java.util.concurrent.CompletableFuture
@@ -664,32 +666,69 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * This is an *update* command. (maybe)
      */
     fun handleSmallMessages(): CompletableFuture<Unit> {
-        val timeForKeepAlive =  Duration.between(keepAliveTimer, LocalDateTime.now()).toMinutes()
-        if(timeForKeepAlive >= 1){
-            keepAliveTimer =  LocalDateTime.now()
-            //TODO send keep-alive.
-        }
-       activeSockets.forEach{ x ->
-           x.value.forEach { socketMap ->
-               val socket = socketMap.value
-               if (socket != null) {
-                   socket.soTimeout = 100
-                   val msgLen = getMsgLength(socket.getInputStream().readNBytes(4))
-                   val msgId = socket.getInputStream().readNBytes(1)
-               }
-           }
-       }
-
-        serverSocket!!.soTimeout = 100
         return CompletableFuture.supplyAsync {
+            val timeForKeepAlive = Duration.between(keepAliveTimer, LocalDateTime.now()).toMinutes()
+            if (timeForKeepAlive >= 1) {
+                keepAliveTimer = LocalDateTime.now()
+                //TODO send keep-alive.
+            }
+            activeSockets.forEach { infoString ->
+                val infohash = infoString.key
+                infoString.value.forEach { socketMap ->
+                    try {
+                        val socket = socketMap.value
+                        val peer = socketMap.key
+                        if (socket != null) {
+                            socket.soTimeout = 100
+                            val msgLenBytes = (socket.getInputStream().readNBytes(4))
+                            val msgLen = getMsgLength(msgLenBytes)
+                            if (msgLen > 0) {
+                                val restOfMsg = socket.getInputStream().readNBytes(msgLen)
+                                val msg = msgLenBytes.plus(restOfMsg)
+                                val msgId = WireProtocolDecoder.messageId(msg)
+                                //choke
+                                if (msgId == 0.toByte()) {
+                                    handleChoke(infohash, peer)
+                                    //unchoke
+                                } else if (msgId == 1.toByte()) {
+                                    handleUnChoke(infohash, peer)
+                                    //have
+                                } else if (msgId == 4.toByte()) {
+                                    handleHave(infohash, peer, msg)
+                                    //bitfield
+                                } else if (msgId == 5.toByte()) {
+                                    handleBitField(infohash, peer, msg)
+                                    //request
+                                } else if (msgId == 6.toByte()) {
+
+                                }
+                            }
+                        }
+                    }catch(e: Exception){
+                        if(e.cause !is SocketTimeoutException){
+                            activeSockets[infohash]!![socketMap.key] = null
+                        }
+                    }
+                }
+            }
+        }.thenApply {
+            serverSocket!!.soTimeout = 100
             while(true){
                 val socket = serverSocket!!.accept()
                 val ip = socket.inetAddress.hostAddress
                 //TODO why is port not as expected
                 val port = socket.port
-                val peer = KnownPeer(ip,port,null)
+                val handshake = WireProtocolDecoder.handshake(socket.getInputStream().readNBytes(68))
+                val peer = KnownPeer(ip,port, String(handshake.peerId))
+                val infohash = byteArray2Hex(handshake.infohash)
+                val actSockets = activeSockets[infohash] ?: hashMapOf()
+                actSockets[peer] = socket
+                activeSockets[infohash] = actSockets
+                val mapPeers = activePeers[infohash] ?: hashMapOf()
+                mapPeers[peer] = ConnectedPeer(peer)
+                activePeers[infohash] = mapPeers
             }
-        }
+        }.exceptionally { /* accept didnt have anything to accept */  }
     }
     /**
      * Download piece number [pieceIndex] of the torrent identified by [infohash].
@@ -729,7 +768,8 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
             }
             piecesStorage.read(infohash)
         }.thenCompose { piecesMapBytes ->
-            var partLength = 2.0.pow(14).toInt()
+            val partLength = 2.0.pow(14).toInt()
+            var requestLength = partLength
             val socket = activeSockets[infohash]!![peer]
             val piecesMap = Bencoder(piecesMapBytes as ByteArray).decodeData() as HashMap<Long, Piece>
             val pieceLength = piecesMap[pieceIndex]!!.length.toInt()
@@ -738,24 +778,40 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
             val lastPartLength = (pieceLength.rem(partLength))
             val requestedPiece = Piece(pieceIndex,pieceLength.toLong(),piecesMap[pieceIndex]!!.hashValue,ByteArray(pieceLength))
             for (i in 0 until numParts) {
-                if(i == numParts-1 && lastPartLength != 0){
-                    partLength = lastPartLength
+                if (i == numParts - 1 && lastPartLength != 0) {
+                    requestLength = lastPartLength
                 }
                 socket!!.getOutputStream().write(
-                    WireProtocolEncoder.encode(6.toByte(), pieceIndex.toInt(), i * (partLength), partLength))
-                val response = socket.getInputStream().readNBytes(13+partLength)
-                //TODO check that this represents peer has diconnected
-                if(response[0] == (-1).toByte()){
-                    activeSockets[infohash]!!.remove(peer)
-                    activePeers[infohash]!!.remove(peer)
-                    throw PeerConnectException("requestPiece: peer disconnected")
+                    WireProtocolEncoder.encode(6.toByte(), pieceIndex.toInt(), i * (partLength), requestLength)
+                )
+
+                val msgLenBytes = (socket.getInputStream().readNBytes(4))
+                val msgLen = getMsgLength(msgLenBytes)
+
+                if (msgLen > 0) {
+                    val restOfMsg = socket.getInputStream().readNBytes(msgLen)
+                    val msg = msgLenBytes.plus(restOfMsg)
+                    val msgId = WireProtocolDecoder.messageId(msg)
+                    //choke
+                    if (msgId == 0.toByte()) {
+                        handleChoke(infohash, peer)
+                        throw PeerChokedException("requestPiece: peer is choking")
+                    } else if (msgId == 1.toByte()) {
+                        handleUnChoke(infohash, peer)
+                        //have
+                    } else if (msgId == 4.toByte()) {
+                        handleHave(infohash, peer, msg)
+                        //bitfield
+                    } else if (msgId == 5.toByte()) {
+                        handleBitField(infohash, peer, msg)
+                        //request
+                    } else if (msgId == 6.toByte()) {
+
+                    }
+                    //old response
+                    //val response = socket.getInputStream().readNBytes(13 + partLength)
+                    WireProtocolDecoder.decode(msg, 2).contents.copyInto(requestedPiece.data!!, i * (partLength))
                 }
-                if(response[4] == 1.toByte()){
-                    //TODO check if this changes peerChoking
-                    activePeers[infohash]!![peer]!!.peerChoking = true
-                    throw PeerChokedException("requestPiece: peer is choking")
-                }
-                WireProtocolDecoder.decode(response,2).contents.copyInto(requestedPiece.data!!,i * (partLength))
             }
             val md = MessageDigest.getInstance("SHA-1")
             val pieceHash = md.digest(requestedPiece.data!!)
@@ -764,6 +820,13 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
             }
             piecesStorage.write(infohash, Bencoder.encodeStr(requestedPiece).toByteArray())
             //TODO send have?, update files? (compelted , downloaded, etc)
+        }.exceptionally { exc ->
+            if (!(exc.cause is IllegalArgumentException ||  exc.cause is PeerChokedException)) {
+                activeSockets[infohash]!!.remove(peer)
+                activePeers[infohash]!!.remove(peer)
+                throw PeerConnectException("requestPiece: peer disconnected")
+            }
+            throw exc
         }
     }
 
@@ -805,7 +868,44 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         infohash: String,
         perPeer: Long,
         startIndex: Long
-    ): CompletableFuture<Map<KnownPeer, List<Long>>> = TODO("Implement me!")
+    ): CompletableFuture<Map<KnownPeer, List<Long>>> {
+        return piecesStorage.read(infohash).thenApply { piecesMapBytes ->
+            if(null == piecesMapBytes) {
+                throw IllegalArgumentException("availablePieces infohash not loaded")
+            }
+            val setNeededPieces = hashSetOf<Long>()
+            val availablePiecesMap = hashMapOf<KnownPeer, List<Long>>()
+            val piecesMap = Bencoder(piecesMapBytes).decodeData() as HashMap<Long, Piece>
+            piecesMap.forEach { entry ->
+                if (null == entry.value.data) {
+                    setNeededPieces.add(entry.key)
+                }
+            }
+            val connectedPeers = activePeers[infohash]?.values ?: listOf<ConnectedPeer>()
+            for (peer in connectedPeers.filter { peer -> !peer.peerChoking }) {
+                val peerPieces = listOf<Long>()
+                for (i in setNeededPieces.filter { x -> x >= startIndex }.sorted()) {
+
+                }
+            }
+            availablePiecesMap
+            }
+        /*  for(piece in piecesMap.values){
+            if(null == piece.data){
+                if(!peersBitMap.isNullOrEmpty()){
+                    if(!peersBitMap[infohash].isNullOrEmpty()){
+                        peersBitMap[infohash]!!.forEach { map ->
+                            if(!activePeers[infohash]!![map.key]!!.peerChoking){
+                                if(peersBitMap[infohash]!![map.key]!![piece.index] == 1.toByte()){
+
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }*/
+    }
 
     /**
      * List pieces that have been requested by (unchoked) peers.
@@ -852,4 +952,40 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @return True if all the pieces have been downloaded and passed hash checking, false otherwise.
      */
     fun recheck(infohash: String): CompletableFuture<Boolean> = TODO("Implement me!")
+
+    private fun handleChoke(infohash: String, peer: KnownPeer) {
+        activePeers[infohash]!![peer]!!.peerChoking = true
+    }
+
+    private fun handleUnChoke(infohash: String, peer: KnownPeer) {
+        activePeers[infohash]!![peer]!!.peerChoking = false
+    }
+
+    private fun handleHave(infohash: String,peer: KnownPeer, msg: ByteArray) {
+        val haveMsg = WireProtocolDecoder.decode(msg,1)
+        val pieceIndex = haveMsg.ints[0]
+        val torrentPeerBitMap = peersBitMap[infohash] ?: hashMapOf()
+        val peerBitMap = torrentPeerBitMap[peer] ?: hashMapOf()
+        peerBitMap[pieceIndex.toLong()] = 1.toByte()
+        torrentPeerBitMap[peer] = peerBitMap
+        peersBitMap[infohash] = torrentPeerBitMap
+    }
+
+    private fun handleBitField(infohash: String,peer: KnownPeer, msg: ByteArray) {
+        val bitFieldmsg = WireProtocolDecoder.decode(msg,1)
+        val bitfield = bitFieldmsg.contents
+        val torrentPeerBitMap = peersBitMap[infohash] ?: hashMapOf()
+        val peerBitMap = torrentPeerBitMap[peer] ?: hashMapOf()
+        bitfield.forEachIndexed { i, byte ->
+            peerBitMap[i.toLong()] = byte
+        }
+        torrentPeerBitMap[peer] = peerBitMap
+        peersBitMap[infohash] = torrentPeerBitMap
+    }
+
+    private fun handleRequest(infohash: String,peer: KnownPeer, msg: ByteArray){
+
+
+    }
+
 }
