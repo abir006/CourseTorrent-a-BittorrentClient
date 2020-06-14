@@ -11,7 +11,11 @@ import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
 import java.lang.Thread.sleep
 import java.net.ServerSocket
 import java.net.Socket
+import java.time.*
+import java.util.*
 import java.util.concurrent.CompletableFuture
+import kotlin.collections.ArrayList
+import kotlin.collections.HashMap
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.pow
@@ -49,7 +53,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
     //TODO peerRequests and peersBitMap in handleSmallMessages
     private val peersBitMap: HashMap<String, HashMap<KnownPeer, HashMap<Long, Byte>>> = hashMapOf()
     private val peersRequests: HashMap<String, HashMap<KnownPeer, List<Long>>> = hashMapOf()
-
+    private var keepAliveTimer = LocalDateTime.now()
     /**
      * Load in the torrent metainfo file from [torrent]. The specification for these files can be found here:
      * [Metainfo File Structure](https://wiki.theory.org/index.php/BitTorrentSpecification#Metainfo_File_Structure).
@@ -659,8 +663,34 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      *
      * This is an *update* command. (maybe)
      */
-    fun handleSmallMessages(): CompletableFuture<Unit> = TODO("Implement me!")
+    fun handleSmallMessages(): CompletableFuture<Unit> {
+        val timeForKeepAlive =  Duration.between(keepAliveTimer, LocalDateTime.now()).toMinutes()
+        if(timeForKeepAlive >= 1){
+            keepAliveTimer =  LocalDateTime.now()
+            //TODO send keep-alive.
+        }
+       activeSockets.forEach{ x ->
+           x.value.forEach { socketMap ->
+               val socket = socketMap.value
+               if (socket != null) {
+                   socket.soTimeout = 100
+                   val msgLen = getMsgLength(socket.getInputStream().readNBytes(4))
+                   val msgId = socket.getInputStream().readNBytes(1)
+               }
+           }
+       }
 
+        serverSocket!!.soTimeout = 100
+        return CompletableFuture.supplyAsync {
+            while(true){
+                val socket = serverSocket!!.accept()
+                val ip = socket.inetAddress.hostAddress
+                //TODO why is port not as expected
+                val port = socket.port
+                val peer = KnownPeer(ip,port,null)
+            }
+        }
+    }
     /**
      * Download piece number [pieceIndex] of the torrent identified by [infohash].
      *
@@ -691,12 +721,12 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
             if (activeSockets[infohash]?.containsKey(peer) != true) {
                 throw IllegalArgumentException("requestPiece: peer is not known")
             }
-            /*if (peersBitMap[infohash]?.get(peer)?.get(pieceIndex)?.equals(1.toByte()) != true) {
+            if (peersBitMap[infohash]?.get(peer)?.get(pieceIndex)?.equals(1.toByte()) != true) {
                 throw IllegalArgumentException("requestPiece: peer doesn't have pieceIndex")
-            }*/
-        /*    if(activePeers[infohash]!![peer]!!.peerChoking){
+            }
+            if(activePeers[infohash]!![peer]!!.peerChoking){
                 throw PeerChokedException("requestPiece: peer is choking")
-            }*/
+            }
             piecesStorage.read(infohash)
         }.thenCompose { piecesMapBytes ->
             var partLength = 2.0.pow(14).toInt()
@@ -733,6 +763,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                 throw PieceHashException("requestPiece: piece is not correct")
             }
             piecesStorage.write(infohash, Bencoder.encodeStr(requestedPiece).toByteArray())
+            //TODO send have?, update files? (compelted , downloaded, etc)
         }
     }
 

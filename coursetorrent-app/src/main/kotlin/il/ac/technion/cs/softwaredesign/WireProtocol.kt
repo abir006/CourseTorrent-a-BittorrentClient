@@ -133,3 +133,10 @@ data class DecodedMessage(
         return result
     }
 }
+
+//TODO check if this returns the correct msgLength
+fun getMsgLength(bytes: ByteArray): Int{
+    val bb = ByteBuffer.wrap(bytes)
+    bb.order(ByteOrder.BIG_ENDIAN)
+    return bb.getInt()
+}
