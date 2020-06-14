@@ -1037,7 +1037,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         activePeers[infohash]!![peer]!!.peerChoking = false
     }
 
-    private fun handleHave(infohash: String,peer: KnownPeer, msg: ByteArray) {
+    private fun handleHave(infohash: String, peer: KnownPeer, msg: ByteArray) {
         val haveMsg = WireProtocolDecoder.decode(msg,1)
         val pieceIndex = haveMsg.ints[0]
         val torrentPeerBitMap = peersBitMap[infohash] ?: hashMapOf()
@@ -1047,7 +1047,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         peersBitMap[infohash] = torrentPeerBitMap
     }
 
-    private fun handleBitField(infohash: String,peer: KnownPeer, msg: ByteArray) {
+    private fun handleBitField(infohash: String, peer: KnownPeer, msg: ByteArray) {
         val bitFieldmsg = WireProtocolDecoder.decode(msg,1)
         val bitfield = bitFieldmsg.contents
         val torrentPeerBitMap = peersBitMap[infohash] ?: hashMapOf()
@@ -1059,9 +1059,22 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         peersBitMap[infohash] = torrentPeerBitMap
     }
 
-    private fun handleRequest(infohash: String,peer: KnownPeer, msg: ByteArray){
+    private fun handleRequest(infohash: String, peer: KnownPeer, msg: ByteArray) {
+        val requestMsg = WireProtocolDecoder.decode(msg,3)
+        val pieceIndex = requestMsg.ints[0]
+        val partLength = 2.0.pow(14).toInt()
+        val offset = requestMsg.ints[1]
+        val partIndex = (offset / partLength).toLong()
 
+        // Get current requests list of the specified piece, peer and infohash
+        val torrentPeers = peersRequests[infohash] ?: hashMapOf()
+        val peersRequestsMap = torrentPeers[peer] ?: hashMapOf()
+        val requestsList = peersRequestsMap[pieceIndex.toLong()] ?: arrayListOf()
 
+        // Update the list
+        requestsList.add(partIndex)
+        peersRequestsMap[pieceIndex.toLong()] = requestsList
+        torrentPeers[peer] = peersRequestsMap
+        peersRequests[infohash] = torrentPeers
     }
-
 }
