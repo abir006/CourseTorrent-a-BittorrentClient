@@ -48,13 +48,13 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
 
 
     private val peerId = "-CS1000-$studentId$randomGenerated"
-    private val port = "6882" // TODO change? randomize?
+    private val port = "6882"
     private var serverSocket: ServerSocket? = null
-    private val activeSockets: HashMap<String, HashMap<KnownPeer, Socket?>> = hashMapOf() //TODO KnownPeer is a key, and therefore his values have no significance
-    private val activePeers: HashMap<String, HashMap<KnownPeer, ConnectedPeer>> = hashMapOf() //TODO ConnectedPeer is the one who holds the actual values
+    private val activeSockets: HashMap<String, HashMap<KnownPeer, Socket?>> = hashMapOf() // Maps infohash->KnownPeer->Socket
+    private val activePeers: HashMap<String, HashMap<KnownPeer, ConnectedPeer>> = hashMapOf() // Maps infohash->KnownPeer->ConnectedPeer (ConnectedPeer has additional properties)
     //TODO peerRequests and peersBitMap in handleSmallMessages
-    private val peersBitMap: HashMap<String, HashMap<KnownPeer, HashMap<Long, Byte>>> = hashMapOf()
-    private val peersRequests: HashMap<String, HashMap<KnownPeer, HashMap<Long, ArrayList<Long>>>> = hashMapOf() // Maps infohash->KnownPeer->PieceIndex->PartsList
+    private val peersBitMap: HashMap<String, HashMap<KnownPeer, HashMap<Long, Byte>>> = hashMapOf() // Maps infohash->KnownPeer->PieceIndex->0/1
+    private val peersRequests: HashMap<String, HashMap<KnownPeer, HashMap<Long, ArrayList<Pair<Int, Int>>>>> = hashMapOf() // Maps infohash->KnownPeer->PieceIndex->(offset, length)
     private var keepAliveTimer = LocalDateTime.now()
     /**
      * Load in the torrent metainfo file from [torrent]. The specification for these files can be found here:
@@ -845,35 +845,32 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      */
     fun sendPiece(infohash: String, peer: KnownPeer, pieceIndex: Long): CompletableFuture<Unit> {
         return announcesStorage.read(infohash).thenCompose { announces ->
-            if (null == announces) throw IllegalArgumentException("sendPiece: infohash isn't loaded")
-            // TODO activePeers or KnownPeers???
-            peersStorage.read(infohash)
-        }.thenCompose { checkedPeer ->
-            if (null == checkedPeer) throw IllegalArgumentException("sendPiece: peer is not known")
-            // TODO make sure the line below deals with null as well
+            if (null == announces) {
+                throw IllegalArgumentException("sendPiece: infohash isn't loaded")
+            }
+            if (activeSockets[infohash]?.containsKey(peer) != true) {
+                throw IllegalArgumentException("sendPiece: peer is not connected")
+            }
             if (peersRequests[infohash]?.get(peer)?.get(pieceIndex)?.isEmpty() != false) {
-                throw IllegalArgumentException("per did not request the specified piece")
+                throw IllegalArgumentException("sendPiece: peer did not request the specified piece")
             }
             piecesStorage.read(infohash)
         }.thenApply { piecesMapBytes ->
             val piecesMap = Bencoder(piecesMapBytes as ByteArray).decodeData() as HashMap<Long, Piece>
-            val socket = activeSockets[infohash]!![peer]!! // TODO Should be checked?
+            val socket = activeSockets[infohash]!![peer]!!
 
             // Deal with existing requests.
-            peersRequests[infohash]?.get(peer)?.get(pieceIndex)?.forEach { partIndex ->
-                sendPiecePart(infohash, peer, socket, pieceIndex, partIndex, piecesMap)
+            peersRequests[infohash]?.get(peer)?.get(pieceIndex)?.forEach { partPair ->
+                sendPiecePart(infohash, peer, socket, pieceIndex, partPair, piecesMap)
             }
 
-            socket.soTimeout = 100 // So that we assure we'll wait a maximum of 100ms before dealing with a new message.
-            do {
-                // Wait 100ms and then check for more requests.
-                sleep(100)
-
-                var term = false
+            // Socket has 100ms timeout, so we'll just keep reading messages from the peer's socket til we get a timeout.
+            socket.soTimeout = 100
+            while (true) {
                 val msgLenBytes = socket.getInputStream().readNBytes(4)
                 val msgLen = getMsgLength(msgLenBytes)
 
-                if (msgLen > 0) { // TODO should be while?
+                if (msgLen > 0) {
                     val restOfMsg = socket.getInputStream().readNBytes(msgLen)
                     val msg = msgLenBytes.plus(restOfMsg)
                     val msgId = WireProtocolDecoder.messageId(msg)
@@ -890,24 +887,20 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                         // bitfield
                         handleBitField(infohash, peer, msg)
                     } else if (msgId == 6.toByte()) {
-                        term = true
                         // request
                         handleRequest(infohash, peer, msg)
 
                         // Deal with pending requests.
-                        peersRequests[infohash]?.get(peer)?.get(pieceIndex)?.forEach { partIndex ->
-                            sendPiecePart(infohash, peer, socket, pieceIndex, partIndex, piecesMap)
+                        peersRequests[infohash]?.get(peer)?.get(pieceIndex)?.forEach { partPair ->
+                            sendPiecePart(infohash, peer, socket, pieceIndex, partPair, piecesMap)
                         }
                     }
                 }
-            } while (term)
+            }
         }.exceptionally { exc ->
             if (exc.cause is IllegalArgumentException) {
                 throw exc
             }
-
-            // Socket related exception - assuming we received no messages, therefore complete future successfuly.
-            CompletableFuture.completedFuture(Unit)
         }
     }
 
@@ -931,11 +924,8 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws IllegalArgumentException if [infohash] is not loaded.
      * @return Mapping from peer to a list of [perPeer] pieces that can be downloaded from it, starting at [startIndex].
      */
-    fun availablePieces(
-        infohash: String,
-        perPeer: Long,
-        startIndex: Long
-    ): CompletableFuture<Map<KnownPeer, List<Long>>> {
+    fun availablePieces(infohash: String, perPeer: Long, startIndex: Long):
+            CompletableFuture<Map<KnownPeer, List<Long>>> {
         return piecesStorage.read(infohash).thenApply { piecesMapBytes ->
             if (null == piecesMapBytes) {
                 throw IllegalArgumentException("availablePieces infohash not loaded")
@@ -976,9 +966,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws IllegalArgumentException if [infohash] is not loaded.
      * @return Mapping from peer to a list of unique pieces that it has requested.
      */
-    fun requestedPieces(
-        infohash: String
-    ): CompletableFuture<Map<KnownPeer, List<Long>>> {
+    fun requestedPieces(infohash: String): CompletableFuture<Map<KnownPeer, List<Long>>> {
         return CompletableFuture.supplyAsync {
             val requestedMap = hashMapOf<KnownPeer, List<Long>>()
             peersRequests.forEach { reqMap ->
@@ -1060,9 +1048,9 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
     private fun handleRequest(infohash: String, peer: KnownPeer, msg: ByteArray) {
         val requestMsg = WireProtocolDecoder.decode(msg,3)
         val pieceIndex = requestMsg.ints[0]
-        val partLength = 2.0.pow(14).toInt()
         val offset = requestMsg.ints[1]
-        val partIndex = (offset / partLength).toLong()
+        val length = requestMsg.ints[2]
+        val partLength = 2.0.pow(14).toInt()
 
         // Get current requests list of the specified piece, peer and infohash
         val torrentPeers = peersRequests[infohash] ?: hashMapOf()
@@ -1070,7 +1058,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         val requestsList = peersRequestsMap[pieceIndex.toLong()] ?: arrayListOf()
 
         // Update the list
-        requestsList.add(partIndex)
+        requestsList.add(Pair(offset, length))
         peersRequestsMap[pieceIndex.toLong()] = requestsList
         torrentPeers[peer] = peersRequestsMap
         peersRequests[infohash] = torrentPeers
@@ -1079,23 +1067,15 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
     /**
      * Sends a specified part of a wanted piece.
      */
-    private fun sendPiecePart(infohash: String, peer: KnownPeer, socket: Socket, pieceIndex: Long, partIndex: Long, piecesMap: HashMap<Long, Piece>) {
-        val partLength = 2.0.pow(14).toInt()
-        var requestLength = partLength
-        val pieceLength = piecesMap[pieceIndex]!!.length.toInt()
-        val numParts = ceil(pieceLength / partLength.toDouble()).toLong()
+    private fun sendPiecePart(infohash: String, peer: KnownPeer, socket: Socket, pieceIndex: Long, partPair:
+    Pair<Int, Int>, piecesMap: HashMap<Long, Piece>) {
+        val offset = partPair.first
+        val length = partPair.second
         val pieceData = piecesMap[pieceIndex]!!.data
-        //if lastPartLength is not 0 then the last piece is smaller than 2^14.
-        val lastPartLength = (pieceLength.rem(partLength))
-        val offset = (partLength * partIndex).toInt()
-        if (partIndex == (numParts - 1) && lastPartLength != 0) {
-            requestLength = lastPartLength
-        }
-
-        val partData = pieceData!!.drop(offset).take(requestLength).toByteArray()
+        val partData = pieceData!!.drop(offset).take(length).toByteArray()
         socket.getOutputStream().write(
-            WireProtocolEncoder.encode(7.toByte(), partData, pieceIndex.toInt(), offset, partLength))
+            WireProtocolEncoder.encode(7.toByte(), partData, pieceIndex.toInt(), offset, length))
         // Remove the partIndex from the requests pieces map.
-        peersRequests[infohash]?.get(peer)?.get(pieceIndex)?.remove(partIndex)
+        peersRequests[infohash]?.get(peer)?.get(pieceIndex)?.remove(partPair)
     }
 }
