@@ -49,6 +49,11 @@ class CourseTorrentTest {
         (courseTorrent.piecesStorage.database.get() as DBSimulator).clear()
     }
 
+    @AfterEach
+    fun `stop torrent`() {
+        courseTorrent.stop()
+    }
+
     @Nested
     inner class `homework 0 tests` {
         @Nested
@@ -526,6 +531,7 @@ class CourseTorrentTest {
 
                 assertEquals(courseTorrent.connectedPeers(debianInfoHash).get(),
                     listOf(ConnectedPeer(testPeer, false, true)))
+                server.close()
                 courseTorrent.stop().get()
             }
         }
@@ -539,7 +545,6 @@ class CourseTorrentTest {
                 courseTorrent.start().get()
 
                 val serverTest = ServerSocket(6883)
-                //server.soTimeout = 100
 
                 val testPeer = KnownPeer("127.0.0.1", 6883, "testPeer")
                 courseTorrent.peersStorage.addPeers(
@@ -573,6 +578,36 @@ class CourseTorrentTest {
                 courseTorrent.connect(debianInfoHash, testPeer).get()
 
                 courseTorrent.requestPiece(debianInfoHash,testPeer,0).get()
+                serverTest.close()
+                courseTorrent.stop().get()
+            }
+        }
+
+        @Nested
+        inner class `testing handleSmallMessages functionality` {
+
+            @Test
+            fun `checking requestedPieces`() {
+                courseTorrent.load(debian).get()
+                courseTorrent.start().get()
+                val port = CompletableFuture.supplyAsync {
+                    try {
+                        val socket = Socket("127.0.0.1", 6882)
+                        socket.getOutputStream().write(
+                            WireProtocolEncoder.handshake(
+                                Bencoder.decodeHexString(debianInfoHash)!!,
+                                Bencoder.decodeHexString(debianInfoHash.reversed())!!))
+                       sleep(3000)
+                        socket.localPort
+                    } catch (e: Exception) {
+                        throw PeerConnectException("remote server accept failed")
+                    }
+                }
+                courseTorrent.handleSmallMessages().get()
+
+                assertEquals(courseTorrent.connectedPeers(
+                    debianInfoHash).get(), listOf(ConnectedPeer(
+                    KnownPeer("127.0.0.1", port.get(), String(Bencoder.decodeHexString(debianInfoHash.reversed())!!)))))
                 courseTorrent.stop().get()
             }
         }
