@@ -3,11 +3,8 @@
 package il.ac.technion.cs.softwaredesign
 
 import com.google.inject.Guice
-import com.natpryce.hamkrest.allElements
+import com.natpryce.hamkrest.*
 import com.natpryce.hamkrest.assertion.assertThat
-import com.natpryce.hamkrest.equalTo
-import com.natpryce.hamkrest.hasSize
-import com.natpryce.hamkrest.isA
 import dev.misfitlabs.kotlinguice4.getInstance
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
@@ -56,7 +53,6 @@ class CourseTorrentTest {
         courseTorrent.stop()
     }
 
-    @Disabled
     @Nested
     inner class `homework 0 tests` {
         @Nested
@@ -220,7 +216,6 @@ class CourseTorrentTest {
         }
     }
 
-    @Disabled
     @Nested
     inner class `homework 1 tests` {
 
@@ -540,6 +535,54 @@ class CourseTorrentTest {
         inner class `testing requestPiece functionality` {
 
             @Test
+            fun `checking requestPiece is correct for lametorrent`() {
+                val infohash = courseTorrent.load(lame).get()
+                courseTorrent.start().get()
+
+                val serverTest = ServerSocket(6883)
+                val futureSocket = CompletableFuture.supplyAsync {
+                    try {
+                        val socket = Socket("127.0.0.1",6882)
+                        val testPeer = KnownPeer("127.0.0.1", socket.localPort, "testsPeerWith20Bytes")
+                        courseTorrent.peersStorage.addPeers(
+                            infohash, listOf(
+                                hashMapOf(
+                                    "ip" to "127.0.0.1", "port" to socket.localPort, "peer id" to "testsPeerWith20Bytes"
+                                )
+                            )
+                        ).get()
+                        socket.getOutputStream().write(
+                            WireProtocolEncoder.handshake(
+                                Bencoder.decodeHexString(infohash)!!,
+                                "testsPeerWith20Bytes".toByteArray()
+                            )
+                        )
+                        val bitmap = ByteArray(16)
+                        bitmap[0] = 1.toByte()
+                        socket.getOutputStream().write(WireProtocolEncoder.encode(5.toByte(),bitmap))
+                        socket.getOutputStream().write(WireProtocolEncoder.encode(1.toByte()))
+                        Pair(testPeer, socket)
+                    } catch (e: Exception) {
+                        throw PeerConnectException("remote server accept failed")
+                    }
+                }
+
+                val testPeer = futureSocket.get().first
+                val socket = futureSocket.get().second
+                CompletableFuture.runAsync{
+                        socket.getInputStream().readNBytes(17)
+                        socket.getOutputStream().write(
+                            WireProtocolEncoder.encode(7.toByte(), lameExeBytes, 0, 0))
+                }
+                courseTorrent.handleSmallMessages().get()
+                courseTorrent.handleSmallMessages().get()
+                val future = assertDoesNotThrow { courseTorrent.requestPiece(infohash,testPeer ,0) }
+                val shouldntThrow = assertDoesNotThrow{ future.get() }
+                serverTest.close()
+                courseTorrent.stop().get()
+            }
+
+            @Test
             fun `checking requestPiece throws piece is not correct after receiving piece not matching`() {
                 courseTorrent.load(debian).get()
                 courseTorrent.start().get()
@@ -622,10 +665,86 @@ class CourseTorrentTest {
                 courseTorrent.stop().get()
             }
         }
+
+        @Nested
+        inner class `testing torrentStats functionality` {
+
+            @Test
+            fun `checking leech time doesnt include start before load`() {
+                courseTorrent.start().get()
+
+                sleep(1000)
+                val timeS = LocalTime.now()
+                courseTorrent.load(debian).get()
+                courseTorrent.stop().get()
+                val timeE = LocalTime.now()
+
+                val stats = courseTorrent.torrentStats(debianInfoHash).get()
+                assertThat(stats.leechTime, lessThan(Duration.between(timeS,timeE)))
+            }
+
+            @Test
+            fun `checking wasted pieces in torrentStats after requestPiece`() {
+                courseTorrent.load(debian).get()
+                courseTorrent.start().get()
+                val serverTest = ServerSocket(6883)
+                val futureSocket = CompletableFuture.supplyAsync {
+                    try {
+                        val socket = Socket("127.0.0.1",6882)
+                        val testPeer = KnownPeer("127.0.0.1", socket.localPort, "testsPeerWith20Bytes")
+                        courseTorrent.peersStorage.addPeers(
+                            debianInfoHash, listOf(
+                                hashMapOf(
+                                    "ip" to "127.0.0.1", "port" to socket.localPort, "peer id" to "testsPeerWith20Bytes"
+                                )
+                            )
+                        ).get()
+                        socket.getOutputStream().write(
+                            WireProtocolEncoder.handshake(
+                                Bencoder.decodeHexString(debianInfoHash)!!,
+                                "testsPeerWith20Bytes".toByteArray()
+                            )
+                        )
+                        val bitmap = ByteArray(16)
+                        bitmap[0] = 1.toByte()
+                        socket.getOutputStream().write(WireProtocolEncoder.encode(5.toByte(),bitmap))
+                        socket.getOutputStream().write(WireProtocolEncoder.encode(1.toByte()))
+                        Pair(testPeer, socket)
+                    } catch (e: Exception) {
+                        throw PeerConnectException("remote server accept failed")
+                    }
+                }
+
+                val testPeer = futureSocket.get().first
+                val socket = futureSocket.get().second
+                CompletableFuture.runAsync{
+                    for(i in 0..16) {
+                        val content = ByteArray(16384).map { byte -> i.toByte() }.toByteArray()
+                        socket.getInputStream().readNBytes(17)
+                        socket.getOutputStream().write(
+                            WireProtocolEncoder.encode(7.toByte(), content, 0, i * 16384)
+                        )
+                    }
+                }
+                courseTorrent.handleSmallMessages().get()
+                courseTorrent.handleSmallMessages().get()
+                val future = assertDoesNotThrow { courseTorrent.requestPiece(debianInfoHash,testPeer ,0) }
+                val throwable = assertThrows<ExecutionException> { future.get() }
+                checkNotNull(throwable.cause)
+                assertThat(throwable.cause!!, isA<PieceHashException>())
+                val wasted = courseTorrent.torrentStats(debianInfoHash).get().wasted
+                assertThat(wasted, equalTo(16*16384.toLong()))
+                courseTorrent.stop().get()
+            }
+        }
     }
 
 
     companion object {
+        val lame = this::class.java.getResource("/lame.torrent").readBytes()
+        val lameExeBytes = this::class.java.getResource("/lame.exe").readBytes().take(16384).toByteArray()
+        val lameEnc = this::class.java.getResource("/lame_enc.dll")
+
         val debian = this::class.java.getResource("/debian-10.3.0-amd64-netinst.iso.torrent").readBytes()
         val debianInfoHash = "5a8062c076fa85e8056451c0d9aa04349ae27909"
         val debianAnnouncesBytes = "41:http://bttracker.debian.org:6969/announce"
