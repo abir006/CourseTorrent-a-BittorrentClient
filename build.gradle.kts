@@ -20,6 +20,10 @@ allprojects {
         set("mockkVersion", "1.9.3")
         set("externalLibraryVersion", "1.2.1")
     }
+
+    dependencies {
+        val dokkaVersion: String? by extra
+    }
 }
 
 subprojects {
@@ -29,6 +33,7 @@ subprojects {
 
     dependencies {
         implementation ("com.google.code.gson:gson:2.8.6")
+        implementation ("org.jetbrains.dokka", "dokka-gradle-plugin", "0.10.1")
         implementation(kotlin("stdlib-jdk8"))
         implementation(kotlin("reflect"))
 

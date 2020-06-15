@@ -1,5 +1,6 @@
 plugins {
     application
+    id("org.jetbrains.dokka") version "0.10.1"
 }
 
 application {
@@ -27,4 +28,11 @@ dependencies {
 
     // For main
     implementation("com.xenomachina", "kotlin-argparser", "2.0.7")
+}
+
+tasks {
+    val dokka by getting(org.jetbrains.dokka.gradle.DokkaTask::class) {
+        outputFormat = "html"
+        outputDirectory = "$buildDir/dokka"
+    }
 }

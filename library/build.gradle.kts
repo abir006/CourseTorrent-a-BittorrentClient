@@ -1,3 +1,7 @@
+plugins {
+    id("org.jetbrains.dokka") version "0.10.1"
+}
+
 val externalLibraryVersion: String? by extra
 val mockkVersion: String? by extra
 val junitVersion: String? by extra
@@ -14,4 +18,11 @@ dependencies {
     testImplementation("org.junit.jupiter", "junit-jupiter-api", junitVersion)
     testImplementation("org.junit.jupiter", "junit-jupiter-params", junitVersion)
     testImplementation("com.natpryce", "hamkrest", hamkrestVersion)
+}
+
+tasks {
+    val dokka by getting(org.jetbrains.dokka.gradle.DokkaTask::class) {
+        outputFormat = "html"
+        outputDirectory = "$buildDir/dokka"
+    }
 }
