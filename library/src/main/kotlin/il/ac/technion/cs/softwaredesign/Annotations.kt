@@ -31,3 +31,8 @@ annotation class TorrentFilesSecureStorage
 @Retention(AnnotationRetention.RUNTIME)
 @BindingAnnotation
 annotation class PiecesSecureStorage
+
+@Target(AnnotationTarget.VALUE_PARAMETER, AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+@BindingAnnotation
+annotation class LoadedTorrentsSecureStorage

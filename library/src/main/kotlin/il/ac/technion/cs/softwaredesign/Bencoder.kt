@@ -2,7 +2,11 @@ package il.ac.technion.cs.softwaredesign
 
 import java.io.*
 import java.security.MessageDigest
+import java.sql.Time
 import java.time.Duration
+import kotlin.time.milliseconds
+import kotlin.time.toDuration
+import kotlin.time.toKotlinDuration
 
 
 //TODO: maybe we want to add details of the returned dicts? from https://wiki.theory.org/index.php/BitTorrentSpecification
@@ -206,11 +210,11 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
                 tmpMap["downloaded"] as Long,
                 tmpMap["left"] as Long,
                 tmpMap["wasted"] as Long,
-                tmpMap["shareRatio"] as Double,
+                (tmpMap["shareRatio"] as String).toDouble(),
                 tmpMap["pieces"] as Long,
                 tmpMap["havePieces"] as Long,
-                tmpMap["leechTime"] as Duration,
-                tmpMap["seedTime"] as Duration
+                Duration.ofMillis((tmpMap["leechTime"] as Long)),
+                Duration.ofMillis(tmpMap["seedTime"] as Long)
             )
         }
         'h' -> {
@@ -287,11 +291,11 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
                 tmpMap["downloaded"] = obj.downloaded
                 tmpMap["left"] = obj.left
                 tmpMap["wasted"] = obj.wasted
-                tmpMap["shareRatio"] = obj.shareRatio
+                tmpMap["shareRatio"] = obj.shareRatio.toString()
                 tmpMap["pieces"] = obj.pieces
                 tmpMap["havePieces"] = obj.havePieces
-                tmpMap["leechTime"] = obj.leechTime
-                tmpMap["seedTime"] = obj.seedTime
+                tmpMap["leechTime"] = obj.leechTime.toMillis()
+                tmpMap["seedTime"] = obj.seedTime.toMillis()
                 "t${tmpMap.map { encodeStr(it.key!!) + encodeStr(it.value!!) }.joinToString("")}e"
             }
             is TorrentFile -> {

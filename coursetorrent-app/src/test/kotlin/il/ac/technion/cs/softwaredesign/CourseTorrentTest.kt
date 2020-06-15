@@ -48,6 +48,7 @@ class CourseTorrentTest {
         (courseTorrent.torrentStatisticsStorage.database.get() as DBSimulator).clear()
         (courseTorrent.torrentFilesStorage.database.get() as DBSimulator).clear()
         (courseTorrent.piecesStorage.database.get() as DBSimulator).clear()
+        (courseTorrent.loadedTorrents.database.get() as DBSimulator).clear()
     }
 
     @AfterEach
@@ -101,11 +102,8 @@ class CourseTorrentTest {
 
                 // Given that a write operation first checks the key is valid, there will be a read operation first.
                 verifyOrder {
-                    courseTorrent.announcesStorage.read(kiwiInfoHash)
                     courseTorrent.announcesStorage.write(kiwiInfoHash, kiwiAnnouncesBytes.toByteArray())
-                    courseTorrent.announcesStorage.read(debianInfoHash)
                     courseTorrent.announcesStorage.write(debianInfoHash, debianAnnouncesBytes.toByteArray())
-                    courseTorrent.announcesStorage.read(templeOSInfoHash)
                     courseTorrent.announcesStorage.write(templeOSInfoHash, templeOSAnnouncesBytes.toByteArray())
                 }
             }
@@ -456,7 +454,7 @@ class CourseTorrentTest {
             @Test
             fun `connect successful to remote client from client side`() {
                 courseTorrent.load(debian).get()
-                courseTorrent.start().get()
+                val x = courseTorrent.start().get()
 
                 val server = ServerSocket(6883)
                 server.soTimeout = 100

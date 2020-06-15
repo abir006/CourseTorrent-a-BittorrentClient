@@ -2,6 +2,8 @@ package il.ac.technion.cs.softwaredesign
 
 import java.sql.Time
 import java.time.Duration
+import java.time.LocalDateTime
+import java.time.LocalTime
 
 sealed class ScrapeData
 
@@ -59,12 +61,6 @@ data class TorrentStats(
 
     var leechTime: Duration, /* Amount of time this torrent was loaded, incomplete, and the client was started */
     var seedTime: Duration /* Amount of time this torrent was loaded, complete, and the client was started */
-)
-
-data class TorrentStatsWrapper(
-     var torrentStats: TorrentStats,
-     var starTime: Time?,
-     var stopTime: Time?
 )
 
 data class Piece(
