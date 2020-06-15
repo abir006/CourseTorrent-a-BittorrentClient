@@ -1145,7 +1145,39 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws IllegalArgumentException if [infohash] is not loaded.
      * @return Mapping from file name to file contents.
      */
-    fun files(infohash: String): CompletableFuture<Map<String, ByteArray>> = TODO("Implement me!")
+    fun files(infohash: String): CompletableFuture<Map<String, ByteArray>> {
+        // TODO make sure the lateinits are updated
+        lateinit var piecesMap: HashMap<Long, Piece>
+        lateinit var torrentFilesMap: HashMap<String, ArrayList<TorrentFile>>
+        return piecesStorage.read(infohash).thenCompose { piecesMapRaw ->
+            if (null == piecesMapRaw) {
+                throw java.lang.IllegalArgumentException("files: infohash isn't loaded")
+            }
+            piecesMap = Bencoder(piecesMapRaw).decodeData() as HashMap<Long, Piece>
+            torrentFilesStorage.read(infohash)
+        }.thenApply { torrentFilesMapRaw ->
+            torrentFilesMap = Bencoder(torrentFilesMapRaw!!).decodeData() as HashMap<String, ArrayList<TorrentFile>>
+            val filesMap = hashMapOf<String, ByteArray>()
+            val totalPieces = ByteArray(0)
+
+            // Concatenate the pieces to a single bytearray for easy iteration, sorted by piece index using stream.
+            piecesMap.entries.stream()
+                .sorted(compareBy { entry: Map.Entry<Long, Piece> -> entry.key })
+                .forEach { pieceEntry ->
+                    totalPieces.plus(pieceEntry.value.data!!) // Not null since we took care of it in load.
+                }
+
+            // Iterate the torrent files and extract the bytes by order.
+            torrentFilesMap[infohash]!!.forEach { torrentFile -> // Assuming not null since infohash is loaded.
+                val name = torrentFile.name
+                val offset = torrentFile.offset.toInt()
+                val length = torrentFile.length.toInt()
+
+                filesMap[name] = totalPieces.drop(offset).take(length).toByteArray()
+            }
+            filesMap
+        }
+    }
 
     /**
      * Load files into the client.
@@ -1156,7 +1188,41 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @param files A mapping from filename to file contents.
      * @throws IllegalArgumentException if [infohash] is not loaded,
      */
-    fun loadFiles(infohash: String, files: Map<String, ByteArray>): CompletableFuture<Unit> = TODO("Implement me!")
+    fun loadFiles(infohash: String, files: Map<String, ByteArray>): CompletableFuture<Unit> {
+        lateinit var piecesData: ByteArray
+        return torrentFilesStorage.read(infohash).thenCompose { torrentFilesMapRaw ->
+            if (null == torrentFilesMapRaw) {
+                throw IllegalArgumentException("loadFiles: infohash isn't loaded")
+            }
+            val torrentFilesMap = Bencoder(torrentFilesMapRaw).decodeData() as HashMap<String, ArrayList<TorrentFile>>
+
+            // Calculate the total length of the pieces combined
+            var totalPiecesLength = 0.toLong()
+            torrentFilesMap[infohash]!!.forEach { torrentFile -> totalPiecesLength += torrentFile.length }
+
+            // Iterate the files we need and set the given bytes in piecesData by the files indices.
+            piecesData = ByteArray(0)
+            torrentFilesMap[infohash]!!
+                .sortedWith( compareBy { torrentFile -> torrentFile.index } )
+                .forEach { torrentFile ->
+                    val fileName = torrentFile.name
+                    val length = torrentFile.length.toInt()
+                    val fileData = files[fileName] ?: ByteArray(length)
+                    piecesData.plus(fileData) }
+
+            // Extract the different pieces from the concatenated piecesData
+            piecesStorage.read(infohash)
+        }.thenCompose { piecesMapRaw ->
+            val piecesMap = Bencoder(piecesMapRaw!!).decodeData() as HashMap<Long, Piece>
+            val updatedPiecesMap = piecesMap.mapValues { piecePair ->
+                val pieceLength = piecePair.value.length.toInt()
+                val pieceOffset = piecePair.value.index.toInt()
+                val pieceData = piecesData.drop(pieceOffset).take(pieceLength)
+                pieceData
+            }
+            piecesStorage.write(infohash, Bencoder.encodeStr(updatedPiecesMap).toByteArray())
+        }
+    }
 
     /**
      * Compare SHA-1 hash for the loaded pieces of torrent [infohash] against the meta-info file. If a piece fails hash
