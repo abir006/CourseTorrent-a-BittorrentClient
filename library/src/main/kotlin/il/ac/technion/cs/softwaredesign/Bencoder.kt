@@ -307,7 +307,7 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
                 tmpMap["index"] = obj.index
                 tmpMap["length"] = obj.length
                 tmpMap["hashValue"] = byteArray2Hex((obj.hashValue))
-                tmpMap["data"] = obj.data?.toString() // TODO works?
+                tmpMap["data"] = obj.data?.toString()
 
                 "p${tmpMap.map { encodeStr(it.key!!) + encodeStr(it.value) }.joinToString("")}e"
             }
@@ -320,13 +320,6 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
             }
         }
 
-        // TODO where do you wanna be?
-        fun hexToByte(hexString: String): Byte {
-            val firstDigit = toDigit(hexString[0])
-            val secondDigit = toDigit(hexString[1])
-            return ((firstDigit shl 4) + secondDigit).toByte()
-        }
-
         private fun toDigit(hexChar: Char): Int {
             val digit = Character.digit(hexChar, 16)
             require(digit != -1) { "Invalid Hexadecimal Character: $hexChar" }
@@ -334,6 +327,12 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
         }
 
         fun decodeHexString(hexString: String): ByteArray? {
+            fun hexToByte(hexString: String): Byte {
+                val firstDigit = toDigit(hexString[0])
+                val secondDigit = toDigit(hexString[1])
+                return ((firstDigit shl 4) + secondDigit).toByte()
+            }
+
             require(hexString.length % 2 != 1) { "Invalid hexadecimal String supplied." }
             val bytes = ByteArray(hexString.length / 2)
             run {
