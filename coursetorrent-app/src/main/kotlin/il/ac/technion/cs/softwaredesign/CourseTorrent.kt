@@ -3,23 +3,19 @@
 package il.ac.technion.cs.softwaredesign
 
 import com.google.inject.Inject
-import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
-import java.security.MessageDigest
 import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
-import java.lang.Exception
+import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
 import java.lang.Thread.sleep
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
-import java.time.*
-import java.util.*
+import java.security.MessageDigest
+import java.time.Duration
+import java.time.LocalDateTime
 import java.util.concurrent.CompletableFuture
-import kotlin.collections.ArrayList
-import kotlin.collections.HashMap
 import kotlin.math.ceil
-import kotlin.math.floor
 import kotlin.math.pow
 
 val URL_ERROR = -1
@@ -828,14 +824,14 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                         if(e !is SocketTimeoutException)
                             throw e
                     }
-
                 }
             val md = MessageDigest.getInstance("SHA-1")
             val pieceHash = md.digest(requestedPiece.data!!)
             if (!requestedPiece.hashValue.contentEquals(pieceHash)) {
                 throw PieceHashException("requestPiece: piece is not correct")
             }
-            piecesStorage.write(infohash, Bencoder.encodeStr(requestedPiece).toByteArray())
+            piecesMap[pieceIndex] = requestedPiece
+            piecesStorage.write(infohash, Bencoder.encodeStr(piecesMap).toByteArray())
             //TODO send have?, update files? (compelted , downloaded, etc)
         }.exceptionally { exc ->
             if (exc.cause !is IllegalArgumentException &&  exc.cause !is PeerChokedException &&
@@ -1012,7 +1008,38 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @throws IllegalArgumentException if [infohash] is not loaded.
      * @return Mapping from file name to file contents.
      */
-    fun files(infohash: String): CompletableFuture<Map<String, ByteArray>> = TODO("Implement me!")
+    fun files(infohash: String): CompletableFuture<Map<String, ByteArray>> {
+        lateinit var piecesMap: HashMap<Long, Piece>
+        lateinit var torrentFilesMap: HashMap<String, ArrayList<TorrentFile>>
+        return piecesStorage.read(infohash).thenCompose { piecesMapRaw ->
+            if (null == piecesMapRaw) {
+                throw java.lang.IllegalArgumentException("files: infohash isn't loaded")
+            }
+            piecesMap = Bencoder(piecesMapRaw).decodeData() as HashMap<Long, Piece>
+            torrentFilesStorage.read(infohash)
+        }.thenApply { torrentFilesMapRaw ->
+            torrentFilesMap = Bencoder(torrentFilesMapRaw!!).decodeData() as HashMap<String, ArrayList<TorrentFile>>
+            val filesMap = hashMapOf<String, ByteArray>()
+            val totalPieces = ByteArray(0)
+
+            // Concatenate the pieces to a single bytearray for easy iteration, sorted by piece index using stream.
+            piecesMap.entries.stream()
+                .sorted(compareBy { entry: Map.Entry<Long, Piece> -> entry.key })
+                .forEach { pieceEntry ->
+                    totalPieces.plus(pieceEntry.value.data!!) // Not null since we took care of it in load.
+                }
+
+            // Iterate the torrent files and extract the bytes by order.
+            torrentFilesMap[infohash]!!.forEach { torrentFile -> // Assuming not null since infohash is loaded.
+                val name = torrentFile.name
+                val offset = torrentFile.offset.toInt()
+                val length = torrentFile.length.toInt()
+
+                filesMap[name] = totalPieces.drop(offset).take(length).toByteArray()
+            }
+            filesMap
+        }
+    }
 
     /**
      * Load files into the client.
