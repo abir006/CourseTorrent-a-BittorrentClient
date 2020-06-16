@@ -1,9 +1,6 @@
 package il.ac.technion.cs.softwaredesign
 
-import java.sql.Time
 import java.time.Duration
-import java.time.LocalDateTime
-import java.time.LocalTime
 
 sealed class ScrapeData
 

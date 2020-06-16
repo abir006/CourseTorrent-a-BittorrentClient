@@ -10,23 +10,18 @@ import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
 import io.mockk.*
-import net.bytebuddy.build.Plugin
-import org.checkerframework.common.value.qual.StaticallyExecutable
 import org.junit.jupiter.api.*
 import org.junit.jupiter.api.Assertions.*
 import java.util.concurrent.ExecutionException
 import org.junit.jupiter.api.assertDoesNotThrow
-import java.io.IOError
 import java.lang.Exception
 import java.lang.Thread.sleep
 import java.net.MalformedURLException
 import java.net.ServerSocket
 import java.net.Socket
-import java.sql.Time
 import java.time.Duration
 import java.time.LocalTime
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.TimeUnit
 
 
 class CourseTorrentTest {
@@ -364,7 +359,7 @@ class CourseTorrentTest {
                 courseTorrent.announce(info,TorrentEvent.STARTED,123,123,123).get()
 
                 courseTorrent.invalidatePeer(info,KnownPeer("102.39.113.100",51413,"matan")).get()
-                val peerList = Bencoder(courseTorrent.peersStorage.read(info).get() as ByteArray).decodeData() as List<*>
+                val peerList = Bencoder.decodeData(courseTorrent.peersStorage.read(info).get() as ByteArray) as List<*>
 
                 assertFalse(peerList.contains(KnownPeer("102.39.113.100",51413,"matan")))
             }
@@ -376,7 +371,7 @@ class CourseTorrentTest {
                 courseTorrent.announce(info,TorrentEvent.STARTED,123,123,123).get()
 
                 assertDoesNotThrow { courseTorrent.invalidatePeer(info,KnownPeer("6.6.6.6",6666,null)).get() }
-                val peerList = Bencoder(courseTorrent.peersStorage.read(info).get() as ByteArray).decodeData() as List<*>
+                val peerList = Bencoder.decodeData(courseTorrent.peersStorage.read(info).get() as ByteArray) as List<*>
 
                 assertEquals(peerList,(arrayListOf(
                     KnownPeer("107.179.196.13",50000,null),
@@ -468,8 +463,8 @@ class CourseTorrentTest {
                         val socket = server.accept()
                         socket.getOutputStream().write(
                             WireProtocolEncoder.handshake(
-                                Bencoder.decodeHexString(debianInfoHash)!!,
-                                Bencoder.decodeHexString(debianInfoHash.reversed())!!
+                                decodeHexString(debianInfoHash)!!,
+                                decodeHexString(debianInfoHash.reversed())!!
                             )
                         )
                         server.close()
@@ -483,7 +478,7 @@ class CourseTorrentTest {
                 val output = remoteSocket.get().inputStream.readNBytes(68)
                 val (otherInfohash, otherPeerId) = StaffWireProtocolDecoder.handshake(output)
 
-                assertTrue(otherInfohash.contentEquals(Bencoder.decodeHexString(debianInfoHash)!!))
+                assertTrue(otherInfohash.contentEquals(decodeHexString(debianInfoHash)!!))
                 assertEquals(
                     courseTorrent.connectedPeers(debianInfoHash).get(),
                     listOf(ConnectedPeer(testPeer, false, true))
@@ -513,8 +508,8 @@ class CourseTorrentTest {
                         val socket = server.accept()
                         socket.getOutputStream().write(
                             WireProtocolEncoder.handshake(
-                                Bencoder.decodeHexString(debianInfoHash)!!,
-                                Bencoder.decodeHexString(debianInfoHash.reversed())!!
+                                decodeHexString(debianInfoHash)!!,
+                                decodeHexString(debianInfoHash.reversed())!!
                             )
                         )
                         server.close()
@@ -553,7 +548,7 @@ class CourseTorrentTest {
                         ).get()
                         socket.getOutputStream().write(
                             WireProtocolEncoder.handshake(
-                                Bencoder.decodeHexString(infohash)!!,
+                                decodeHexString(infohash)!!,
                                 "testsPeerWith20Bytes".toByteArray()
                             )
                         )
@@ -602,7 +597,7 @@ class CourseTorrentTest {
                         ).get()
                         socket.getOutputStream().write(
                             WireProtocolEncoder.handshake(
-                                Bencoder.decodeHexString(debianInfoHash)!!,
+                                decodeHexString(debianInfoHash)!!,
                                 "testsPeerWith20Bytes".toByteArray()
                             )
                         )
@@ -651,8 +646,8 @@ class CourseTorrentTest {
                         val socket = Socket("127.0.0.1", 6882)
                         socket.getOutputStream().write(
                             WireProtocolEncoder.handshake(
-                                Bencoder.decodeHexString(debianInfoHash)!!,
-                                Bencoder.decodeHexString(debianInfoHash.reversed())!!))
+                                decodeHexString(debianInfoHash)!!,
+                                decodeHexString(debianInfoHash.reversed())!!))
                         val handshake = WireProtocolDecoder.handshake(socket.getInputStream().readNBytes(68))
                         assertEquals(byteArray2Hex(handshake.infohash), debianInfoHash)
                        sleep(3000)
@@ -665,7 +660,7 @@ class CourseTorrentTest {
 
                 assertEquals(courseTorrent.connectedPeers(
                     debianInfoHash).get(), listOf(ConnectedPeer(
-                    KnownPeer("127.0.0.1", port.get(), String(Bencoder.decodeHexString(debianInfoHash.reversed())!!)))))
+                    KnownPeer("127.0.0.1", port.get(), String(decodeHexString(debianInfoHash.reversed())!!)))))
                 courseTorrent.stop().get()
             }
         }
@@ -705,7 +700,7 @@ class CourseTorrentTest {
                         ).get()
                         socket.getOutputStream().write(
                             WireProtocolEncoder.handshake(
-                                Bencoder.decodeHexString(debianInfoHash)!!,
+                                decodeHexString(debianInfoHash)!!,
                                 "testsPeerWith20Bytes".toByteArray()
                             )
                         )
@@ -807,23 +802,23 @@ class CourseTorrentTest {
             "om:80", "udp://open.demonii.com:1337", "udp://tracker.coppersurfer.tk:6969", "udp://exodus.desync.co" +
             "m:6969"))
 
-        val bencodedSimpleAnnouncePeerList = Bencoder.encodeStr(arrayListOf(
+        val bencodedSimpleAnnouncePeerList = Bencoder.encodeData(arrayListOf(
             KnownPeer("107.179.196.13",50000,null),
             KnownPeer("102.39.113.100",51413,"matan")))
-        val bencodedSimpleAnnounceResponse = Bencoder.encodeStr(hashMapOf("peers" to arrayListOf(
+        val bencodedSimpleAnnounceResponse = Bencoder.encodeData(hashMapOf("peers" to arrayListOf(
             hashMapOf("ip" to "107.179.196.13","port" to 50000),
             hashMapOf("ip" to "102.39.113.100","port" to 51413,"peer id" to "matan")),
             "complete" to 1000, "incomplete" to 26,"interval" to 62))
-        val bencodedSimpleAnnounceScrape = Bencoder.encodeStr(Scrape(1000,0,26,null))
-        val bencodedFailureAnnounceResponse = Bencoder.encodeStr(hashMapOf("failure reason" to "we need to test it"))
-        val bencodedFailureScrape = Bencoder.encodeStr(Failure("we need to test it"))
-        val bencodedURLFailureScrape = Bencoder.encodeStr(Failure("announce: URL connection failed"))
-        val bencodedSimpleScrapeResponse = Bencoder.encodeStr(hashMapOf("files" to hashMapOf(
+        val bencodedSimpleAnnounceScrape = Bencoder.encodeData(Scrape(1000,0,26,null))
+        val bencodedFailureAnnounceResponse = Bencoder.encodeData(hashMapOf("failure reason" to "we need to test it"))
+        val bencodedFailureScrape = Bencoder.encodeData(Failure("we need to test it"))
+        val bencodedURLFailureScrape = Bencoder.encodeData(Failure("announce: URL connection failed"))
+        val bencodedSimpleScrapeResponse = Bencoder.encodeData(hashMapOf("files" to hashMapOf(
             "binaryinfohash" to hashMapOf(
                 "downloaded" to 100, "complete" to 200, "incomplete" to 50, "name" to "gal lalouche"))))
-        val bencodedSimpleScrape = Bencoder.encodeStr(Scrape(200, 100, 50, "gal lalouche"))
-        val bencodedUrlFailScrape = Bencoder.encodeStr(Failure("scrape: URL connection failed"))
-        val bencodedKnownPeersResponse = Bencoder.encodeStr(hashMapOf("peers" to arrayListOf(
+        val bencodedSimpleScrape = Bencoder.encodeData(Scrape(200, 100, 50, "gal lalouche"))
+        val bencodedUrlFailScrape = Bencoder.encodeData(Failure("scrape: URL connection failed"))
+        val bencodedKnownPeersResponse = Bencoder.encodeData(hashMapOf("peers" to arrayListOf(
             hashMapOf("ip" to "123.4.245.23","port" to 50000,"peer id" to "6"),
             hashMapOf("ip" to "104.244.253.29","port" to 51413,"peer id" to "5"),
             hashMapOf("ip" to "1.198.3.93","port" to 51413,"peer id" to "1"),
@@ -838,8 +833,8 @@ class CourseTorrentTest {
         val sock = assertDoesNotThrow { Socket("10.100.102.5", port) }
         sock.outputStream.write(
             WireProtocolEncoder.handshake(
-                Bencoder.decodeHexString(infohash)!!,
-                Bencoder.decodeHexString(infohash.reversed())!!
+                decodeHexString(infohash)!!,
+                decodeHexString(infohash.reversed())!!
             )
         )
         return sock

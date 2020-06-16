@@ -23,7 +23,7 @@ class TrackerStatistics @Inject constructor(@TrackerStatisticsSecureStorage stor
             val name = responseDict["name"] as String?
             val scrape = Scrape(complete, download, incomplete, name)
             val scrapeKey = infohash + "_" + tracker
-            val scrapeData = Bencoder.encodeStr(scrape)
+            val scrapeData = Bencoder.encodeData(scrape)
             Pair(scrapeKey, scrapeData)
         }.thenCompose { (scrapeKey, scrapeData) ->
             write(scrapeKey, scrapeData.toByteArray())
@@ -39,7 +39,7 @@ class TrackerStatistics @Inject constructor(@TrackerStatisticsSecureStorage stor
                     reason: String)  : CompletableFuture<Unit> {
         return CompletableFuture.supplyAsync {
             val scrapeKey = infohash + "_" + tracker
-            val scrapeData = Bencoder.encodeStr(Failure(reason))
+            val scrapeData = Bencoder.encodeData(Failure(reason))
             Pair(scrapeKey, scrapeData)
         }.thenCompose { (scrapeKey, scrapeData) ->
             write(scrapeKey, scrapeData.toByteArray())

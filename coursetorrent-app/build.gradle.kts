@@ -34,5 +34,10 @@ tasks {
     val dokka by getting(org.jetbrains.dokka.gradle.DokkaTask::class) {
         outputFormat = "html"
         outputDirectory = "$buildDir/dokka"
+
+        configuration {
+            // Used to exclude non public members.
+            includeNonPublic = false
+        }
     }
 }

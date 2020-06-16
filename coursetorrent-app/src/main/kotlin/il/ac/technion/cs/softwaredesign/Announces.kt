@@ -14,7 +14,7 @@ class Announces @Inject constructor(@AnnouncesSecureStorage storage: Storage) : 
         return CompletableFuture.completedFuture {
             announces.forEach{ lst -> lst.shuffled() }
         }.thenCompose {
-            write(infohash, Bencoder.encodeStr(announces).toByteArray())
+            write(infohash, Bencoder.encodeData(announces).toByteArray())
         }
      }
 
@@ -39,7 +39,7 @@ class Announces @Inject constructor(@AnnouncesSecureStorage storage: Storage) : 
             newAnnounces.add(idx, newAnnounceList)
             newAnnounces
         }.thenCompose { newAnnounces ->
-            write(infohash, Bencoder.encodeStr(newAnnounces.toList()).toByteArray())
+            write(infohash, Bencoder.encodeData(newAnnounces.toList()).toByteArray())
         }
 
     }

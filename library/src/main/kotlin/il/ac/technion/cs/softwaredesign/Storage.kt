@@ -16,91 +16,17 @@ open class Storage @Inject constructor(var database: CompletableFuture<SecureSto
      * Adds the pair (key, value) to both the cache and the storage.
      **/
     fun write(key: String, value: ByteArray): CompletableFuture<Unit> {
-        /*   val future: CompletableFuture<Unit> = CompletableFuture.supply {
-            cache.write(key, value)
-        }.thenCompose {
-            database.write(key.toByteArray(), value)
-        }
-        return future*/
-
-        /*      return CompletableFuture.supply {
-            cache.write(key, value)
-        }.thenCompose {
-            database
-        }.thenCompose { db ->
-            println("hi")
-            db.write(key.toByteArray(), value)
-        }*/
-
-       /* return CompletableFuture.supply {
-            cache.write(key, value)
-        }.thenCombine(database){_, db ->  db }.thenCompose { db -> db.write(key.toByteArray(), value) }*/
-           /* db.write(key.toByteArray(), value)*/
-
         return database.thenCompose { db ->
             cache.write(key, value)
             db.write(key.toByteArray(), value)
         }
     }
 
-
     /**
      * Returns null if the key was not found, else returns the value associated with the key.
      * First searches the local cache, and then the DB and updates the cache accordingly.
      * ByteArray(0) marks a deleted or not found key so as to prevent unnecessary access to the DB in the future.
      */
-/*    fun read(key: String): CompletableFuture<ByteArray?> {
-        val value = cache.read(key)
-        if (null == value) {
-            return database.thenCompose { db ->
-                db.read(key.toByteArray()).thenApply { dbValue ->
-                    // Key not found in DB
-                    if (null == dbValue || dbValue.contentEquals(ByteArray(0))) {
-                        // Update cache
-                        cache.write(key, ByteArray(0))
-                        null
-                    } else {
-                        cache.write(key, dbValue)
-                        dbValue
-                    }
-                }
-            }
-        } else if (value.contentEquals(ByteArray(0))) {
-            // Key deleted
-            return CompletableFuture<ByteArray?>()
-        } else {
-            // Key found in cache
-            return CompletableFuture.completedFuture(value)
-        }
-    }*/
-/*
-    fun read(key: String): CompletableFuture<ByteArray?> {
-        return CompletableFuture<ByteArray?>().thenCompose {
-            val value = cache.read(key)
-            if (null == value) {
-                database.thenCompose { db ->
-                    db.read(key.toByteArray()).thenApply { dbValue ->
-                        // Key not found in DB
-                        if (null == dbValue || dbValue.contentEquals(ByteArray(0))) {
-                            // Update cache
-                            cache.write(key, ByteArray(0))
-                            null
-                        } else {
-                            cache.write(key, dbValue)
-                            dbValue
-                        }
-                    }
-                }
-            } else if (value.contentEquals(ByteArray(0))) {
-                // Key deleted
-                CompletableFuture()
-            } else {
-                // Key found in cache
-                CompletableFuture.completedFuture(value)
-            }
-        }
-    }*/
-
     fun read(key: String): CompletableFuture<ByteArray?> {
         return database.thenCompose { db ->
             val value = cache.read(key)

@@ -2,7 +2,8 @@ package il.ac.technion.cs.softwaredesign
 
 /**
  * Creates a cache in order to store recently used values. Mainly used in order to increase the read/write speeds when
- * accessing already known torrents.
+ * accessing already known torrents or serialized objects.
+ * This class is in usage as a built-in cache in our Storage class.
  */
 class Cache {
     val cacheMap: LinkedHashMap<String, ByteArray> = LinkedHashMap()
