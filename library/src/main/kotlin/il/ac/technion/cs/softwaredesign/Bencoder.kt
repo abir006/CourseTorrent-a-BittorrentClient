@@ -9,7 +9,7 @@ import kotlin.time.toDuration
 import kotlin.time.toKotlinDuration
 
 
-//TODO: maybe we want to add details of the returned dicts? from https://wiki.theory.org/index.php/BitTorrentSpecification
+
 
 // Based on the following Git project - https://gist.github.com/omarmiatello/b09d4ba995c8c0881b0921c0e7aa9bdc
 // Changes were made in order to avoid encoding the Pieces value as UTF8.

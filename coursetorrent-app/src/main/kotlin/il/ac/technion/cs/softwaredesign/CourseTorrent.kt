@@ -14,12 +14,10 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.time.*
-import java.util.*
 import java.util.concurrent.CompletableFuture
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import kotlin.math.ceil
-import kotlin.math.floor
 import kotlin.math.pow
 
 const val URL_ERROR = -1
@@ -82,59 +80,77 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                 val announcements = (metaInfo["announce-list"] ?: metaInfo["announce"])
                 announcesStorage.write(infohash, Bencoder.encodeStr(announcements).toByteArray())
             }.thenCompose {
-                torrentList.add(infohash)
-                loadedTorrents.write(LOADED_TORRENTS, Bencoder.encodeStr(torrentList).toByteArray())
-            }.thenCompose {
-                val infoRawByes = metaInfo["info"] as ByteArray
-                val infoDict = Bencoder(infoRawByes).decodeTorrent() as HashMap<*,*>
-                var numPieces: Long = 0
-                val piecesMap = hashMapOf<Long, Piece>()
-                val pieceLength = infoDict["piece length"] as Long
-                val torrentFiles = arrayListOf<TorrentFile>()
-
-                if (infoDict.containsKey("files")) {
-                    // Multiple files
-                    val files = infoDict["files"] as List<HashMap<String, Any>>
-                    var totalLength: Long = 0
-
-                    files.forEachIndexed { i, file ->
-                        val fileName = (file["path"] as List<String>).joinToString("\\")
-                        val fileLength = (file["length"] as Long)
-                        // At this stage, totalLength is the current offset before adding fileLength
-                        val torrentFile = TorrentFile(fileName, i.toLong(), totalLength, fileLength)
-                        totalLength += fileLength
-                        torrentFiles.add(torrentFile)
-                    }
-                    numPieces = ceil(totalLength/(infoDict["piece length"] as Long).toDouble()).toLong()
-                    for (i in 0 until numPieces) {
-                        piecesMap[i] = Piece(i, pieceLength, (infoDict["pieces"] as ByteArray).drop(20 * i.toInt()).take(20).toByteArray(), null)
-                    }
-                } else {
-                    // Single file
-                    numPieces = ceil((infoDict["length"] as Long)/(infoDict["piece length"] as Long).toDouble()).toLong()
-                    for (i in 0 until numPieces) {
-                        piecesMap[i] = Piece(i, pieceLength, (infoDict["pieces"] as ByteArray).drop(20 * i.toInt()).take(20).toByteArray(), null)
-                    }
-                    torrentFiles.add(TorrentFile(infoDict["name"] as String, 0, 0, infoDict["length"] as Long))
-                }
+                val triple = extractFilesAndPieces(metaInfo)
+                val numPieces: Long = triple.first
+                val piecesMap = triple.second
+                val torrentFiles = triple.third
                 //didn't start yet
                 if(serverSocket != null){
                     torrentTimer[infohash] = LocalTime.now()
                 }
                 pieceHashMap[infohash] = piecesMap
-                piecesStorage.write(infohash, Bencoder.encodeStr(piecesMap).toByteArray()).thenCompose {
-                    torrentFilesStorage.write(infohash, Bencoder.encodeStr(torrentFiles).toByteArray()) }.thenCompose {
-                    var torrentLength: Long = 0
+                val future0 = CompletableFuture.supplyAsync {  torrentList.add(infohash) }.thenCompose{loadedTorrents.write(LOADED_TORRENTS, Bencoder.encodeStr(torrentList).toByteArray())}
+                val future1 =  piecesStorage.write(infohash, Bencoder.encodeStr(piecesMap).toByteArray())
+                val future2 = torrentFilesStorage.write(infohash, Bencoder.encodeStr(torrentFiles).toByteArray())
+                val future3 = CompletableFuture.completedFuture(Unit).thenCompose { var torrentLength: Long = 0
                     piecesMap.forEach{ entry -> torrentLength += entry.value.length }
                     val stat = TorrentStats(0,0,torrentLength,0,0.0,numPieces,0,
                         Duration.ZERO,
                         Duration.ZERO)
                     torrentStatisticsMap[infohash] = stat
-                    torrentStatisticsStorage.write(infohash,Bencoder.encodeStr(stat).toByteArray())
-                }.thenApply {
-                    infohash }
+                    torrentStatisticsStorage.write(infohash,Bencoder.encodeStr(stat).toByteArray()) }
+                CompletableFuture.allOf(future0,future1,future2,future3).thenApply{ infohash }
             }
         }
+    }
+
+    /**
+     * Returns the number of pieces, pieces map and torrent files map from the torrent meta-info.
+     */
+    private fun extractFilesAndPieces(metaInfo: HashMap<*, *>): Triple<Long, HashMap<Long, Piece>, ArrayList<TorrentFile>> {
+        val infoRawByes = metaInfo["info"] as ByteArray
+        val infoDict = Bencoder(infoRawByes).decodeTorrent() as HashMap<*, *>
+        var numPieces: Long = 0
+        val piecesMap = hashMapOf<Long, Piece>()
+        val pieceLength = infoDict["piece length"] as Long
+        val torrentFiles = arrayListOf<TorrentFile>()
+
+        if (infoDict.containsKey("files")) {
+            // Multiple files
+            val files = infoDict["files"] as List<HashMap<String, Any>>
+            var totalLength: Long = 0
+
+            files.forEachIndexed { i, file ->
+                val fileName = (file["path"] as List<String>).joinToString("\\")
+                val fileLength = (file["length"] as Long)
+                // At this stage, totalLength is the current offset before adding fileLength
+                val torrentFile = TorrentFile(fileName, i.toLong(), totalLength, fileLength)
+                totalLength += fileLength
+                torrentFiles.add(torrentFile)
+            }
+            numPieces = ceil(totalLength / (infoDict["piece length"] as Long).toDouble()).toLong()
+            for (i in 0 until numPieces) {
+                piecesMap[i] = Piece(
+                    i,
+                    pieceLength,
+                    (infoDict["pieces"] as ByteArray).drop(20 * i.toInt()).take(20).toByteArray(),
+                    null
+                )
+            }
+        } else {
+            // Single file
+            numPieces = ceil((infoDict["length"] as Long) / (infoDict["piece length"] as Long).toDouble()).toLong()
+            for (i in 0 until numPieces) {
+                piecesMap[i] = Piece(
+                    i,
+                    pieceLength,
+                    (infoDict["pieces"] as ByteArray).drop(20 * i.toInt()).take(20).toByteArray(),
+                    null
+                )
+            }
+            torrentFiles.add(TorrentFile(infoDict["name"] as String, 0, 0, infoDict["length"] as Long))
+        }
+        return Triple(numPieces, piecesMap, torrentFiles)
     }
 
     /**
@@ -146,42 +162,37 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      */
     fun unload(infohash: String): CompletableFuture<Unit> {
         return loadedTorrents.read(LOADED_TORRENTS).thenCompose { value ->
-            if(value == null) {
+            if (value == null) {
                 throw IllegalArgumentException("unload: infohash isn't loaded")
             }
             val torrentList = (Bencoder(value).decodeData() as ArrayList<String>)
-            if(!torrentList.contains(infohash)) {
-                throw IllegalStateException("load: infohash was already loaded")
+            if (!torrentList.contains(infohash)) {
+                throw IllegalArgumentException("unload: infohash isn't loaded")
             } else {
                 torrentList.remove(infohash)
                 loadedTorrents.write(LOADED_TORRENTS, Bencoder.encodeStr(torrentList).toByteArray())
             }
-        }.thenCompose{ announces(infohash) }.thenCompose { announces  ->
-            var future = CompletableFuture.completedFuture(Unit)
-            announces as List<List<String>>
-            announces.forEach { trackerTier: List<String> ->
-                trackerTier.forEach { tracker ->
-                    future = future.thenCompose {
-                        trackerStatisticsStorage.delete(infohash + "_" + tracker) }
+        }.thenCompose {
+            announces(infohash).thenCompose { announces ->
+                val futuresList = arrayListOf<CompletableFuture<Unit>>()
+                announces as List<List<String>>
+                var future = CompletableFuture.completedFuture(Unit)
+                announces.forEach { trackerTier: List<String> ->
+                    trackerTier.forEach { tracker ->
+                        future = future.thenCompose { (trackerStatisticsStorage.delete(infohash + "_" + tracker)) }
+                    }
                 }
+                futuresList.add(future)
+                futuresList.add(peersStorage.delete(infohash))
+                futuresList.add(piecesStorage.delete(infohash).thenApply { pieceHashMap.remove(infohash); Unit })
+                futuresList.add(torrentFilesStorage.delete(infohash))
+                futuresList.add(announcesStorage.delete(infohash))
+                futuresList.add(torrentStatisticsStorage.delete(infohash).thenApply { torrentStatisticsMap.remove(infohash); Unit })
+                CompletableFuture.allOf(*futuresList.toTypedArray()).thenApply { Unit }
             }
-            future
-        }.exceptionally {
-            throw IllegalArgumentException("unload: infohash isn't loaded")
-        }.thenCompose {
-            peersStorage.delete(infohash)
-        }.thenCompose {
-            pieceHashMap.remove(infohash)
-            piecesStorage.delete(infohash)
-        }.thenCompose {
-           torrentFilesStorage.delete(infohash)
-        }.thenCompose {
-            announcesStorage.delete(infohash)
-        }.thenCompose {
-            torrentStatisticsMap.remove(infohash)
-            torrentStatisticsStorage.delete(infohash)
         }
     }
+
 
     /**
      * Return the announce URLs for the loaded torrent identified by [infohash].
@@ -268,14 +279,11 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                     val reason = responseDict["failure reason"] as String
                     trackerStatisticsStorage.addFailure(infohash, tracker, reason).thenApply { Pair(false, 0) }
                 } else {
-                    peersStorage.addPeers(infohash, responseDict["peers"] as List<Map<*, *>>?).thenCompose {
-                        announcesStorage.moveTrackerToHead(infohash, announces, announces[tier], tracker)
-                    }.thenCompose {
-                        trackerStatisticsStorage.addScrape(responseDict, infohash, tracker)
-                    }.thenCompose {
-                        CompletableFuture.completedFuture(Pair(true, responseDict.getOrDefault("interval", 0) as Int))
-                    }
-                }
+                    CompletableFuture.allOf(
+                        peersStorage.addPeers(infohash, responseDict["peers"] as List<Map<*, *>>?) ,
+                        announcesStorage.moveTrackerToHead(infohash, announces, announces[tier], tracker),
+                        trackerStatisticsStorage.addScrape(responseDict, infohash, tracker)).thenCompose {
+                        CompletableFuture.completedFuture(Pair(true, responseDict.getOrDefault("interval", 0) as Int)) } }
         }.exceptionally { exc ->
             if (exc.cause is java.lang.IllegalArgumentException) {
                 throw exc
@@ -284,14 +292,12 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         return future.thenCompose { (isDone: Boolean, interval: Int) ->
             if (isDone) {
                 CompletableFuture.completedFuture(interval)
-            } else {
-                if (interval == URL_ERROR) {
-                    trackerStatisticsStorage.addFailure(infohash, tracker, "announce: URL connection failed").thenCompose {
-                        announceAux(infohash, event, announces, tier, trackerIdx + 1, uploaded, downloaded, left)
-                    }
-                } else {
+            } else if (interval == URL_ERROR) {
+                trackerStatisticsStorage.addFailure(infohash, tracker, "announce: URL connection failed").thenCompose {
                     announceAux(infohash, event, announces, tier, trackerIdx + 1, uploaded, downloaded, left)
                 }
+            } else {
+                announceAux(infohash, event, announces, tier, trackerIdx + 1, uploaded, downloaded, left)
             }
         }
     }
@@ -529,7 +535,6 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                         if(stats!!.left > 0){
                             stats.leechTime +=  Duration.between(torrentTimer[infohash], stopTime)
                         }else {
-                            //TODO check if this is correct after 2nd load
                             stats.seedTime += Duration.between(torrentTimer[infohash], stopTime)
                         }
                         torrentStatisticsStorage.write(infohash, Bencoder.encodeStr(stats).toByteArray())
@@ -811,6 +816,8 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                 val ip = socket.inetAddress.hostAddress
                 val port = socket.port
                 val handshake = WireProtocolDecoder.handshake(socket.getInputStream().readNBytes(68))
+                // assuming according to assignment that handle does not fail and therefore infohash is valid.
+                socket.getOutputStream().write(WireProtocolEncoder.handshake(handshake.infohash, peerId.toByteArray()))
                 val peer = KnownPeer(ip,port, String(handshake.peerId))
                 val infohash = byteArray2Hex(handshake.infohash)
                 val actSockets = activeSockets[infohash] ?: hashMapOf()
@@ -820,9 +827,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                 mapPeers[peer] = ConnectedPeer(peer)
                 activePeers[infohash] = mapPeers
             }
-        }.exceptionally {
-            //(accept didnt have anything to accept)
-        }
+        }.exceptionally { /* Finished accepting new sockets. */ }
     }
 
     /**
@@ -881,48 +886,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                 socket!!.getOutputStream().write(
                     WireProtocolEncoder.encode(6.toByte(), pieceIndex.toInt(), i * (partLength), requestLength)
                 )
-                try {
-                    while (true) {
-                        val msgLenBytes = (socket.getInputStream().readNBytes(4))
-                        val msgLen = WireProtocolDecoder.length(msgLenBytes)
-
-                        if (msgLen > 0) {
-                            val restOfMsg = socket.getInputStream().readNBytes(msgLen)
-                            val msg = msgLenBytes.plus(restOfMsg)
-                            val msgId = WireProtocolDecoder.messageId(msg)
-                            if (msgId == 0.toByte()) {
-                                // choke
-                                handleChoke(infohash, peer)
-                                throw PeerChokedException("requestPiece: peer is choking")
-                            } else if (msgId == 1.toByte()) {
-                                // unchoke
-                                handleUnChoke(infohash, peer)
-                            } else if (msgId == 4.toByte()) {
-                                // have
-                                if(handleHave(infohash, peer, msg)){
-                                    socket.getOutputStream().write(WireProtocolEncoder.encode(2.toByte()))
-                                }
-                            } else if (msgId == 5.toByte()) {
-                                // bitfield
-                                if(handleBitField(infohash, peer, msg)){
-                                    socket.getOutputStream().write(WireProtocolEncoder.encode(2.toByte()))
-                                }
-                            } else if (msgId == 6.toByte()) {
-                                // request
-                                handleRequest(infohash, peer, msg)
-                            } else {
-                                WireProtocolDecoder.decode(msg, 2).contents.copyInto(
-                                    requestedPiece.data!!,
-                                    i * (partLength)
-                                )
-                                downloaded += requestLength
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    if (e !is SocketTimeoutException)
-                        throw e
-                }
+                downloaded += requestPieceHandler(socket, infohash, peer, requestedPiece, i, partLength, requestLength)
             }
             val md = MessageDigest.getInstance("SHA-1")
             val pieceHash = md.digest(requestedPiece.data!!)
@@ -943,17 +907,74 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
             piecesStorage.write(infohash, Bencoder.encodeStr(piecesMap).toByteArray())
         }.exceptionally { exc ->
             if (exc.cause is PeerChokedException || exc.cause is PieceHashException){
+                torrentStatisticsMap[infohash]!!.downloaded += downloaded
                 torrentStatisticsMap[infohash]!!.wasted += downloaded
                 throw exc
             } else if (exc.cause is IllegalArgumentException){
                 throw exc
             } else {
+                torrentStatisticsMap[infohash]!!.downloaded += downloaded
                 torrentStatisticsMap[infohash]!!.wasted += downloaded
                 activeSockets[infohash]!!.remove(peer)
                 activePeers[infohash]!!.remove(peer)
                 throw PeerConnectException("requestPiece: peer disconnected")
             }
         }
+    }
+
+    private fun requestPieceHandler(
+        socket: Socket,
+        infohash: String,
+        peer: KnownPeer,
+        requestedPiece: Piece,
+        i: Int,
+        partLength: Int,
+        requestLength: Int
+    ): Long {
+        var downloaded: Long = 0
+        try {
+            while (true) {
+                val msgLenBytes = (socket.getInputStream().readNBytes(4))
+                val msgLen = WireProtocolDecoder.length(msgLenBytes)
+
+                if (msgLen > 0) {
+                    val restOfMsg = socket.getInputStream().readNBytes(msgLen)
+                    val msg = msgLenBytes.plus(restOfMsg)
+                    val msgId = WireProtocolDecoder.messageId(msg)
+                    if (msgId == 0.toByte()) {
+                        // choke
+                        handleChoke(infohash, peer)
+                        throw PeerChokedException("requestPiece: peer is choking")
+                    } else if (msgId == 1.toByte()) {
+                        // unchoke
+                        handleUnChoke(infohash, peer)
+                    } else if (msgId == 4.toByte()) {
+                        // have
+                        if (handleHave(infohash, peer, msg)) {
+                            socket.getOutputStream().write(WireProtocolEncoder.encode(2.toByte()))
+                        }
+                    } else if (msgId == 5.toByte()) {
+                        // bitfield
+                        if (handleBitField(infohash, peer, msg)) {
+                            socket.getOutputStream().write(WireProtocolEncoder.encode(2.toByte()))
+                        }
+                    } else if (msgId == 6.toByte()) {
+                        // request
+                        handleRequest(infohash, peer, msg)
+                    } else if (msgId == 7.toByte()) {
+                        WireProtocolDecoder.decode(msg, 2).contents.copyInto(
+                            requestedPiece.data!!,
+                            i * (partLength)
+                        )
+                        downloaded += requestLength
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            if (e !is SocketTimeoutException)
+                throw e
+        }
+        return downloaded
     }
 
     private fun sendHaveAndNotInterested(
@@ -1151,7 +1172,6 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
      * @return Mapping from file name to file contents.
      */
     fun files(infohash: String): CompletableFuture<Map<String, ByteArray>> {
-        // TODO make sure the lateinits are updated
         lateinit var piecesMap: HashMap<Long, Piece>
         lateinit var torrentFilesMap: ArrayList<TorrentFile>
         return piecesStorage.read(infohash).thenCompose { piecesMapRaw ->
@@ -1230,6 +1250,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                 val pieceData = piecesData.drop(pieceOffset.toInt()).take(pieceLength.toInt()).toByteArray()
                 updatedPiecesMap[pieceIndex] = Piece(pieceIndex, pieceLength, pieceHash, pieceData)
             }
+            pieceHashMap[infohash] = updatedPiecesMap
             piecesStorage.write(infohash, Bencoder.encodeStr(updatedPiecesMap).toByteArray())
         }
     }

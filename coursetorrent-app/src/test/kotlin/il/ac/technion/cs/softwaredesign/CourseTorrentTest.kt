@@ -557,6 +557,7 @@ class CourseTorrentTest {
                                 "testsPeerWith20Bytes".toByteArray()
                             )
                         )
+                        val handshake = WireProtocolDecoder.handshake(socket.getInputStream().readNBytes(68))
                         val bitmap = ByteArray(16)
                         bitmap[0] = 1.toByte()
                         socket.getOutputStream().write(WireProtocolEncoder.encode(5.toByte(),bitmap))
@@ -566,7 +567,7 @@ class CourseTorrentTest {
                         throw PeerConnectException("remote server accept failed")
                     }
                 }
-
+                courseTorrent.handleSmallMessages().get()
                 val testPeer = futureSocket.get().first
                 val socket = futureSocket.get().second
                 CompletableFuture.runAsync{
@@ -605,6 +606,8 @@ class CourseTorrentTest {
                                 "testsPeerWith20Bytes".toByteArray()
                             )
                         )
+                        val handshake = WireProtocolDecoder.handshake(socket.getInputStream().readNBytes(68))
+                        assertEquals(byteArray2Hex(handshake.infohash), debianInfoHash)
                         val bitmap = ByteArray(16)
                         bitmap[0] = 1.toByte()
                         socket.getOutputStream().write(WireProtocolEncoder.encode(5.toByte(),bitmap))
@@ -614,7 +617,7 @@ class CourseTorrentTest {
                         throw PeerConnectException("remote server accept failed")
                     }
                 }
-
+                courseTorrent.handleSmallMessages().get()
                 val testPeer = futureSocket.get().first
                 val socket = futureSocket.get().second
                 CompletableFuture.runAsync{
@@ -626,7 +629,6 @@ class CourseTorrentTest {
                         )
                     }
                 }
-                courseTorrent.handleSmallMessages().get()
                 courseTorrent.handleSmallMessages().get()
                 val future = assertDoesNotThrow { courseTorrent.requestPiece(debianInfoHash,testPeer ,0) }
                 val throwable = assertThrows<ExecutionException> { future.get() }
@@ -651,6 +653,8 @@ class CourseTorrentTest {
                             WireProtocolEncoder.handshake(
                                 Bencoder.decodeHexString(debianInfoHash)!!,
                                 Bencoder.decodeHexString(debianInfoHash.reversed())!!))
+                        val handshake = WireProtocolDecoder.handshake(socket.getInputStream().readNBytes(68))
+                        assertEquals(byteArray2Hex(handshake.infohash), debianInfoHash)
                        sleep(3000)
                         socket.localPort
                     } catch (e: Exception) {
@@ -705,6 +709,8 @@ class CourseTorrentTest {
                                 "testsPeerWith20Bytes".toByteArray()
                             )
                         )
+                        val handshake = WireProtocolDecoder.handshake(socket.getInputStream().readNBytes(68))
+                        assertEquals(byteArray2Hex(handshake.infohash), debianInfoHash)
                         val bitmap = ByteArray(16)
                         bitmap[0] = 1.toByte()
                         socket.getOutputStream().write(WireProtocolEncoder.encode(5.toByte(),bitmap))
@@ -714,7 +720,7 @@ class CourseTorrentTest {
                         throw PeerConnectException("remote server accept failed")
                     }
                 }
-
+                courseTorrent.handleSmallMessages().get()
                 val testPeer = futureSocket.get().first
                 val socket = futureSocket.get().second
                 CompletableFuture.runAsync{
@@ -726,7 +732,6 @@ class CourseTorrentTest {
                         )
                     }
                 }
-                courseTorrent.handleSmallMessages().get()
                 courseTorrent.handleSmallMessages().get()
                 val future = assertDoesNotThrow { courseTorrent.requestPiece(debianInfoHash,testPeer ,0) }
                 val throwable = assertThrows<ExecutionException> { future.get() }
