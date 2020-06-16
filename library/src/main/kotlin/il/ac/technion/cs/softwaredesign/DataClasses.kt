@@ -19,7 +19,25 @@ data class KnownPeer(
     val ip: String,
     val port: Int,
     val peerId: String?
-)
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as KnownPeer
+
+        if (ip != other.ip) return false
+        if (port != other.port) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = ip.hashCode()
+        result = 31 * result + port
+        return result
+    }
+}
 
 data class ConnectedPeer(
     val knownPeer: KnownPeer,

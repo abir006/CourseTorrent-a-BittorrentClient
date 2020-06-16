@@ -27,12 +27,12 @@ import java.util.LinkedHashMap
  * encodeData - encodes any of the supported formats.
  *      Example usage: val scrape: Scrape = encodeData(scrapeRaw).
  */
-class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int> = mutableListOf(), var keyLength: MutableList<Int> = mutableListOf()) {
+class Bencoder(private var arr: ByteArray,private var i: Int = 0,private var keyStart: MutableList<Int> = mutableListOf(),private var keyLength: MutableList<Int> = mutableListOf()) {
 
     companion object {
         /**
          * Decodes a bencoded ByteArray torrent metainfo stored.
-         * Usage example: val (dict, infohash) = Bencoder().decodeTorrent(debian as ByteArray).
+         * Usage example: val (infohash, dict) = Bencoder().decodeTorrent(debian as ByteArray).
          * Returns a metainfo dictionary (String -> Any) and the infohash.
          */
         fun decodeTorrent(torrent: ByteArray): Pair<String, HashMap<*, *>> {
@@ -71,8 +71,8 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
             is Int -> "i${obj}e"
             is Long -> "i${obj}e"
             is String -> "${obj.length}:$obj"
-            is List<*> -> "l${obj.joinToString("") { encodeData(it!!) }}e"
-            is HashMap<*, *> -> "d${obj.map { encodeData(it.key!!) + encodeData(it.value!!) }.joinToString("")}e"
+            is List<*> -> "l${obj.joinToString("") { encodeData(it) }}e"
+            is HashMap<*, *> -> "d${obj.map { encodeData(it.key) + encodeData(it.value) }.joinToString("")}e"
             is Scrape -> {
                 val tmpMap = HashMap<String, Any?>()
                 tmpMap["complete"] = obj.complete
@@ -119,8 +119,7 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
                 tmpMap["index"] = obj.index
                 tmpMap["length"] = obj.length
                 tmpMap["hashValue"] = byteArray2Hex((obj.hashValue))
-                tmpMap["data"] = obj.data?.toString()
-
+                tmpMap["data"] = if (obj.data != null) byteArray2Hex(obj.data) else null
                 "p${tmpMap.map { encodeData(it.key) + encodeData(it.value) }.joinToString("")}e"
             }
             else -> {
@@ -358,7 +357,7 @@ class Bencoder(var arr: ByteArray, var i: Int = 0, var keyStart: MutableList<Int
                     obj = this@Bencoder.decodeData()
                 }
             }
-            val data = if (tmpMap["data"] != null) (tmpMap["data"] as String).toByteArray() else null
+            val data = if (tmpMap["data"] != null) decodeHexString(tmpMap["data"] as String) else null
             Piece(
                 tmpMap["index"] as Long,
                 tmpMap["length"] as Long,

@@ -391,7 +391,7 @@ class CourseTorrentTest {
                 val peerList = courseTorrent.knownPeers(info).get()
 
                 assertEquals(peerList, arrayListOf(
-                    KnownPeer("102.39.113.100",51413,"matan"),
+                    KnownPeer("102.39.113.100",51413, byteArray2Hex("idWith20BytesExactly".toByteArray())),
                     KnownPeer("107.179.196.13",50000,null)))
             }
 
@@ -405,12 +405,8 @@ class CourseTorrentTest {
 
                 // peerId indicates the wanted order
                 assertEquals(peerList, arrayListOf(
-                    KnownPeer("1.198.3.93",51413,"1"),
-                    KnownPeer( "32.183.93.40", 51413,"2"),
-                    KnownPeer("104.30.244.2",51413,"3"),
-                    KnownPeer("104.244.4.1", 51413,"4"),
-                    KnownPeer("104.244.253.29",51413,"5"),
-                    KnownPeer("123.4.245.23",50000,"6")))
+                    KnownPeer("104.244.253.29",51413,null),
+                    KnownPeer("123.4.245.23",50000,null)))
             }
         }
 
@@ -449,11 +445,11 @@ class CourseTorrentTest {
                 val server = ServerSocket(6883)
                 server.soTimeout = 100
 
-                val testPeer = KnownPeer("127.0.0.1", 6883, "testPeer")
+                val testPeer = KnownPeer("127.0.0.1", 6883, debianInfoHash.reversed())
                 courseTorrent.peersStorage.addPeers(
                     debianInfoHash, listOf(
                         hashMapOf(
-                            "ip" to "127.0.0.1", "port" to 6883, "peer id" to "testPeer"
+                            "ip" to "127.0.0.1", "port" to 6883, "peer id" to debianInfoHash.reversed()
                         )
                     )
                 ).get()
@@ -494,11 +490,11 @@ class CourseTorrentTest {
                 val server = ServerSocket(6883)
                 server.soTimeout = 100
 
-                val testPeer = KnownPeer("127.0.0.1", 6883, "testPeer")
+                val testPeer = KnownPeer("127.0.0.1", 6883, debianInfoHash.reversed())
                 courseTorrent.peersStorage.addPeers(
                     debianInfoHash, listOf(
                         hashMapOf(
-                            "ip" to "127.0.0.1", "port" to 6883, "peer id" to "testPeer"
+                            "ip" to "127.0.0.1", "port" to 6883, "peer id" to debianInfoHash.reversed()
                         )
                     )
                 ).get()
@@ -739,11 +735,43 @@ class CourseTorrentTest {
         }
     }
 
+    @Nested
+    inner class `testing loadFiles funcionality` {
+
+        @Test
+        fun `checking files works correctly`() {
+            val infohash = courseTorrent.load(lame).get()
+            val files = hashMapOf<String, ByteArray>()
+            files["lame.exe"] = lameExe
+            files["lame_enc.dll"] = lameEnc
+            courseTorrent.loadFiles(infohash, files).get()
+            val filesRequested = courseTorrent.files(infohash).get()
+            files.forEach { entry ->
+                assert(entry.value.contentEquals(filesRequested[entry.key] ?: ByteArray(0)))
+            }
+        }
+
+        @Test
+        fun `checking loadFiles works correctly`() {
+            val infohash = courseTorrent.load(lame).get()
+            val files = hashMapOf<String, ByteArray>()
+            files["lame.exe"] = lameExe
+            files["lame_enc.dll"] = lameEnc
+            courseTorrent.loadFiles(infohash, files).get()
+            val piecesBytes = courseTorrent.piecesStorage.read(infohash).get()
+            assertNotNull(piecesBytes)
+            val pieces = Bencoder.decodeData(piecesBytes!!) as HashMap<Long, Piece>
+            var pieceBytes2 = ByteArray(0)
+            pieces.values.forEach{ pieceBytes2 = pieceBytes2.plus(it.data ?: ByteArray(0)) }
+            assert(lameExe.plus(lameEnc).contentEquals(pieceBytes2))
+        }
+    }
 
     companion object {
         val lame = this::class.java.getResource("/lame.torrent").readBytes()
         val lameExeBytes = this::class.java.getResource("/lame.exe").readBytes().take(16384).toByteArray()
-        val lameEnc = this::class.java.getResource("/lame_enc.dll")
+        val lameExe = this::class.java.getResource("/lame.exe").readBytes()
+        val lameEnc = this::class.java.getResource("/lame_enc.dll").readBytes()
 
         val debian = this::class.java.getResource("/debian-10.3.0-amd64-netinst.iso.torrent").readBytes()
         val debianInfoHash = "5a8062c076fa85e8056451c0d9aa04349ae27909"
@@ -804,10 +832,10 @@ class CourseTorrentTest {
 
         val bencodedSimpleAnnouncePeerList = Bencoder.encodeData(arrayListOf(
             KnownPeer("107.179.196.13",50000,null),
-            KnownPeer("102.39.113.100",51413,"matan")))
+            KnownPeer("102.39.113.100",51413,null)))
         val bencodedSimpleAnnounceResponse = Bencoder.encodeData(hashMapOf("peers" to arrayListOf(
-            hashMapOf("ip" to "107.179.196.13","port" to 50000),
-            hashMapOf("ip" to "102.39.113.100","port" to 51413,"peer id" to "matan")),
+            hashMapOf("ip" to "107.179.196.13","port" to 50000,"peer id" to byteArray2Hex("idWith20BytesExactly".toByteArray())),
+            hashMapOf("ip" to "102.39.113.100","port" to 51413)),
             "complete" to 1000, "incomplete" to 26,"interval" to 62))
         val bencodedSimpleAnnounceScrape = Bencoder.encodeData(Scrape(1000,0,26,null))
         val bencodedFailureAnnounceResponse = Bencoder.encodeData(hashMapOf("failure reason" to "we need to test it"))
@@ -819,12 +847,8 @@ class CourseTorrentTest {
         val bencodedSimpleScrape = Bencoder.encodeData(Scrape(200, 100, 50, "gal lalouche"))
         val bencodedUrlFailScrape = Bencoder.encodeData(Failure("scrape: URL connection failed"))
         val bencodedKnownPeersResponse = Bencoder.encodeData(hashMapOf("peers" to arrayListOf(
-            hashMapOf("ip" to "123.4.245.23","port" to 50000,"peer id" to "6"),
-            hashMapOf("ip" to "104.244.253.29","port" to 51413,"peer id" to "5"),
-            hashMapOf("ip" to "1.198.3.93","port" to 51413,"peer id" to "1"),
-            hashMapOf("ip" to "32.183.93.40","port" to 51413,"peer id" to "2"),
-            hashMapOf("ip" to "104.30.244.2","port" to 51413,"peer id" to "3"),
-            hashMapOf("ip" to "104.244.4.1","port" to 51413,"peer id" to "4"))))
+            hashMapOf("ip" to "123.4.245.23","port" to 50000),
+            hashMapOf("ip" to "104.244.253.29","port" to 51413))))
     }
 
     private fun initiateRemotePeerForConnect(infohash: String): Socket {

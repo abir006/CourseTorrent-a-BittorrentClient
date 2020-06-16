@@ -1,5 +1,3 @@
-
-
 package il.ac.technion.cs.softwaredesign
 
 import com.google.inject.Guice
@@ -42,11 +40,11 @@ fun main(args: Array<String>): Unit = mainBody("CourseTorrent") {
             courseTorrent.start()
         }.thenCompose {
             initialAnnounce(courseTorrent, infohash)
-        }.thenAccept { data ->
+        }.thenCompose { data ->
             mainLoop(courseTorrent, data)
         }.thenCompose {
             completedAnnounce(courseTorrent, infohash)
-        }.thenCompose {
+        }.thenAccept {
             courseTorrent.files(infohash).thenApply { output ->
                 output.keys.forEach { path ->
                     outputDir.mkdirs()
@@ -165,11 +163,7 @@ private fun uploadPiece(
             val peer = it.keys.shuffled().first()
             val piece = it.getValue(peer).shuffled().first()
             courseTorrent.sendPiece(data.infohash, peer, piece).thenCompose {
-
-
-/* after sending the piece, choke the peer */
-
-
+                /* after sending the piece, choke the peer */
                 courseTorrent.choke(data.infohash, peer)
             }
         } else {
@@ -217,11 +211,7 @@ private fun connectToPeers(
     data: Data
 ): CompletableFuture<Unit> {
     return courseTorrent.connectedPeers(data.infohash).thenCompose {
-
-
-/* Get a list of peers to connect to (if we aren't connected to enough) */
-
-
+        /* Get a list of peers to connect to (if we aren't connected to enough) */
         val connected = it.asSequence().map(ConnectedPeer::knownPeer).toSet()
         courseTorrent.knownPeers(data.infohash)
             .thenApply { knownPeers ->
@@ -229,11 +219,7 @@ private fun connectToPeers(
                     .take(CONNECT_PER_LOOP).asIterable()
             }
             .thenCompose { peersToConnect ->
-
-
-/* Connect to peers (and invalidate those that we can't connect to so that they won't be tried again) */
-
-
+                /* Connect to peers (and invalidate those that we can't connect to so that they won't be tried again) */
                 peersToConnect.fold(CompletableFuture.completedFuture(Unit)) { future, peer ->
                     future.thenCompose {
                         courseTorrent.connect(data.infohash, peer).handle { _, throwable -> throwable != null }
@@ -260,4 +246,3 @@ private fun disconnectPeers(
             }
     }
 }
-

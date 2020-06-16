@@ -24,10 +24,23 @@ class Peers @Inject constructor(@PeersSecureStorage  storage: Storage) : Storage
                 for (peer in newPeers) {
                     val peerId: String? = peer["peer id"] as String?
                     //if (peerId.isNullOrEmpty()) peerId = ""
+                    existingPeers.remove(KnownPeer(peer["ip"] as String, peer["port"] as Int, peerId))
                     existingPeers.add(KnownPeer(peer["ip"] as String, peer["port"] as Int, peerId))
                 }
                 write(infohash, Bencoder.encodeData(existingPeers.toList()).toByteArray())
             }
+        }
+    }
+
+    fun addPeer(infohash: String, peer: KnownPeer) : CompletableFuture<Unit> {
+        return read(infohash).thenCompose { existingPeersRaw ->
+            var existingPeers: MutableSet<KnownPeer> = mutableSetOf()
+            if (null != existingPeersRaw) {
+                existingPeers = (Bencoder.decodeData(existingPeersRaw) as ArrayList<KnownPeer>).toMutableSet()
+            }
+            existingPeers.remove(peer)
+            existingPeers.add(peer)
+            write(infohash, Bencoder.encodeData(existingPeers.toList()).toByteArray())
         }
     }
 }
