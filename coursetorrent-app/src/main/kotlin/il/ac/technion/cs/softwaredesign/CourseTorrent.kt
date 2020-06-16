@@ -13,11 +13,14 @@ import java.lang.Thread.sleep
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.nio.ByteBuffer
 import java.time.*
+import java.util.*
 import java.util.concurrent.CompletableFuture
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.pow
 
 const val URL_ERROR = -1
@@ -48,7 +51,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
     private var serverSocket: ServerSocket? = null
     private var activeSockets: HashMap<String, HashMap<KnownPeer, Socket?>> = hashMapOf() // Maps infohash->KnownPeer->Socket
     private val activePeers: HashMap<String, HashMap<KnownPeer, ConnectedPeer>> = hashMapOf() // Maps infohash->KnownPeer->ConnectedPeer (ConnectedPeer has additional properties)
-    private val peersBitMap: HashMap<String, HashMap<KnownPeer, HashMap<Long, Byte>>> = hashMapOf() // Maps infohash->KnownPeer->PieceIndex->0/1
+    private val peersBitMap: HashMap<String, HashMap<KnownPeer, HashMap<Long, Boolean>>> = hashMapOf() // Maps infohash->KnownPeer->PieceIndex->0/1
     private val peersRequests: HashMap<String, HashMap<KnownPeer, HashMap<Long, ArrayList<Pair<Int, Int>>>>> = hashMapOf() // Maps infohash->KnownPeer->PieceIndex->(offset, length)
     private var pieceHashMap: HashMap<String, HashMap<Long, Piece>> = hashMapOf()
     private var torrentTimer: HashMap<String, LocalTime> = hashMapOf()
@@ -597,11 +600,17 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                 // Init bitfield
                 piecesStorage.read(infohash).thenApply { pieceMapBytes ->
                     val pieceMap = Bencoder(pieceMapBytes as ByteArray).decodeData() as HashMap<Long, Piece>
-                    val bitField = ByteArray(pieceMap.size)
+                    //val bitField = ByteArray(ceil(pieceMap.size/8.0).toInt())
+                    val bitSet = BitSet(pieceMap.size)
                     pieceMap.forEach { index, piece ->
-                        bitField[index.toInt()] = if (null == piece.data) 0.toByte() else 1.toByte()
+                        val i = floor(index / 8.0)
+                        if(piece.data != null) {
+                            bitSet.set((i* 8 + (7 - index.rem(8))).toInt())
+                        }
+                       // bitField[index.toInt()] = if (null == piece.data) 0.toByte() else 1.toByte()
                     }
-                    if (bitField.contains(1.toByte())) {
+                    if (!bitSet.isEmpty) {
+                        val bitField = bitSet.toByteArray().plus(ByteArray(ceil(pieceMap.size/8.0).toInt() - bitSet.toByteArray().size))
                         socketOutputStream.write(WireProtocolEncoder.encode(5.toByte(),bitField))
                     }
                 }.thenCompose {
@@ -861,7 +870,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
             if (activeSockets[infohash]?.containsKey(peer) != true) {
                 throw IllegalArgumentException("requestPiece: peer is not known")
             }
-            if (peersBitMap[infohash]?.get(peer)?.get(pieceIndex)?.equals(1.toByte()) != true) {
+            if (peersBitMap[infohash]?.get(peer)?.get(pieceIndex) != true) {
                 throw IllegalArgumentException("requestPiece: peer doesn't have pieceIndex")
             }
             if (activePeers[infohash]!![peer]!!.peerChoking) {
@@ -990,7 +999,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
                     var sendNotInterested = true
                     val peerBit = peersBitMap[infohash]!![conPeer.key]!!
                     piecesMap.forEach { piece ->
-                        if (peerBit[piece.key] == 1.toByte() && null == piece.value.data) {
+                        if ((peerBit[piece.key] == true)  && null == piece.value.data) {
                             sendNotInterested = false
                         }
                     }
@@ -1121,13 +1130,13 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
             for (peer in connectedPeers.filter { peer -> !peer.peerChoking }) {
                 val peerPieces = arrayListOf<Long>()
                 for (i in setNeededPieces.filter { x -> x >= startIndex }.sorted()) {
-                    if (peersBitMap[infohash]?.get(peer.knownPeer)?.get(i) == 1.toByte()) {
+                    if (peersBitMap[infohash]?.get(peer.knownPeer)?.get(i) == true) {
                         peerPieces.add(i)
                     }
                 }
                 // Leave only the pieces the peer has with index smaller than startIndex
                 for (i in setNeededPieces.filter { x -> x < startIndex }.sorted()) {
-                    if (peersBitMap[infohash]?.get(peer.knownPeer)?.get(i) == 1.toByte()) {
+                    if (peersBitMap[infohash]?.get(peer.knownPeer)?.get(i) == true) {
                         peerPieces.add(i)
                     }
                 }
@@ -1310,7 +1319,7 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         val pieceIndex = haveMsg.ints[0]
         val torrentPeerBitMap = peersBitMap[infohash] ?: hashMapOf()
         val peerBitMap = torrentPeerBitMap[peer] ?: hashMapOf()
-        peerBitMap[pieceIndex.toLong()] = 1.toByte()
+        peerBitMap[pieceIndex.toLong()] = true
         torrentPeerBitMap[peer] = peerBitMap
         peersBitMap[infohash] = torrentPeerBitMap
         if(!activePeers[infohash]!![peer]!!.amInterested){
@@ -1331,14 +1340,25 @@ class CourseTorrent @Inject constructor(val announcesStorage: Announces,
         val bitfield = bitFieldmsg.contents
         val torrentPeerBitMap = peersBitMap[infohash] ?: hashMapOf()
         val peerBitMap = torrentPeerBitMap[peer] ?: hashMapOf()
-        bitfield.forEachIndexed { i, byte ->
-            peerBitMap[i.toLong()] = byte
+        val bits = BitSet.valueOf(bitfield)
+        for (i in 0 until bitfield.size){
+            for (j in 0 until 8){
+                peerBitMap[(i*8)+j.toLong()] = bits.get(8*i+(7-j))
+            }
         }
+   /*     bitfield.forEachIndexed { i, byte ->
+            val byteArray = ByteArray(1)
+            byteArray[0] = byte
+            val bitset = BitSet.valueOf(byteArray)
+            for(j in 0 until 8){
+                peerBitMap[i.toLong()] = bitset.get(8*i+(7-j))
+            }
+        }*/
         torrentPeerBitMap[peer] = peerBitMap
         peersBitMap[infohash] = torrentPeerBitMap
         if(!activePeers[infohash]!![peer]!!.amInterested){
             peerBitMap.forEach{ entry ->
-                if(entry.value == 1.toByte() && pieceHashMap[infohash]!![entry.key]!!.data == null){
+                if(entry.value && pieceHashMap[infohash]!![entry.key]!!.data == null){
                     sendInderested = true
                 }
             }
