@@ -1,4 +1,4 @@
-# A Kotlin Torrent like client
+# A Kotlin BitTorrent like client
 
 ## Authors
 * Abir Shaked, 204596597
