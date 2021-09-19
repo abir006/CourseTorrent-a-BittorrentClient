@@ -3,7 +3,6 @@
 ## Authors
 * Abir Shaked, 204596597
 * Shahak Ben-Kalifa, 311242440
-* 
 ## key Features:
 Asynchronous programming using kotlin Future's.
 Tested using JUnit.
