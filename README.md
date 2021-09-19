@@ -3,6 +3,13 @@
 ## Authors
 * Abir Shaked, 204596597
 * Shahak Ben-Kalifa, 311242440
+* 
+## key Features:
+Asynchronous programming using kotlin Future's.
+Tested using JUnit.
+Dependency injection and Mock's using Guice.
+Built with Gradle.
+
 
 ### Implementation Summary
 Our whole implementation is based on composing futures and combining while futures are not dependent, or not using the
