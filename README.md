@@ -3,11 +3,12 @@
 ## Authors
 * Abir Shaked, 204596597
 * Shahak Ben-Kalifa, 311242440
-## key Features:
-Asynchronous programming using kotlin Future's.
-Tested using JUnit.
-Dependency injection and Mock's using Guice.
-Built with Gradle.
+
+## Key Features:
+* Asynchronous programming using kotlin Future's
+* Tested using JUnit
+* Dependency injection and Mock's using Guice
+* Built with Gradle
 
 
 ### Implementation Summary
