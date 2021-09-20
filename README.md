@@ -1,5 +1,5 @@
 # A Kotlin BitTorrent like client
-This project was an assignment during Software Design course at the Technion.
+This project was done during Software Design course at the Technion.
 
 ## Authors
 * Abir Shaked, 204596597
